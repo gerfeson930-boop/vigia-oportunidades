@@ -9,7 +9,7 @@ from .fontes import ml
 log = logging.getLogger("vigia.bot")
 
 COMANDOS = [
-    ("achados", "Últimos achados salvos"),
+    ("achados", "Últimos achados salvos (/achados 30 para ver mais)"),
     ("nova", "Nova busca: /nova iphone 13 -pro ate 2500"),
     ("lista", "Ver suas buscas"),
     ("remove", "Apagar busca: /remove 3"),
@@ -279,18 +279,46 @@ class Bot:
         self.responder(self._ajuda())
 
     def c_achados(self, arg):
-        itens = db.ultimos_alertas(10)
+        """/achados (10, em cards) ou /achados 30 (até 30, em álbuns de fotos)."""
+        nums = [int(x) for x in arg.split() if x.isdigit()]
+        n = max(1, min(30, nums[0])) if nums else 10
+        itens = db.ultimos_alertas(n)
         if not itens:
             return self.responder("Nenhum achado ainda. Os alertas começam depois da primeira rodada "
                                   "de cada busca.")
-        self.responder(f"🔔 <b>Últimos {len(itens)} achados</b> (do mais antigo ao mais recente):")
+        self.responder(f"🔔 <b>Últimos {len(itens)} achados</b> (do mais antigo ao mais recente)."
+                       + ("" if n > 10 else " Para ver mais: /achados 30"))
+        cards = []
         for a in reversed(itens):  # o mais recente fica por último, perto do campo de digitar
             preco = f"R$ {a['preco']:,.0f}".replace(",", ".")
             texto = (f"💰 <b>{preco}</b>\n🔔 <b>{html.escape(a['titulo'])}</b>\n"
                      f"📍 {html.escape(a.get('local') or '')}  ·  visto {a['visto_em'][8:10]}/{a['visto_em'][5:7]}"
                      f"\n🔎 {html.escape(a['termo'])}\n"
                      f'<a href="{html.escape(a["url"])}">Abrir anúncio</a>')
-            self.responder(texto, a.get("foto") or None)
+            cards.append((a.get("foto") or "", texto))
+        if n <= 10:
+            for foto, texto in cards:
+                self.responder(texto, foto or None)
+            return
+        # muitos: álbuns de 10 fotos (cada foto com sua legenda); sem foto vai como texto
+        chat = self._atual if self._atual is not None else self.chat()
+        com_foto = [c for c in cards if c[0]]
+        sobras = [t for f, t in cards if not f]
+        for i in range(0, len(com_foto), 10):
+            try:
+                sobras += self.tg.album(chat, com_foto[i:i + 10])
+            except Exception:
+                log.exception("falha ao enviar álbum de achados")
+                sobras += [t for _, t in com_foto[i:i + 10]]
+        if sobras:
+            self._enviar(chat, "\n\n".join(sobras))
+
+    def _mandar_historico(self, chat):
+        anterior, self._atual = self._atual, chat
+        try:
+            self.c_achados("10")
+        finally:
+            self._atual = anterior
 
     def c_nova(self, arg):
         bid, termo = self._criar(arg)
@@ -423,8 +451,9 @@ class Bot:
     def c_liberar(self, arg):
         chat, nome = self._alterar_pessoa(arg, "pendentes", "convidados")
         self._enviar(chat, "✅ Liberado! A partir de agora você recebe os alertas do vigia aqui.\n\n" + self._ajuda(False))
-        self.responder(f"✅ {html.escape(nome)} liberado. Ele recebe os mesmos alertas que você. "
-                       f"Para tirar depois: /pessoas")
+        self._mandar_historico(chat)  # já chega com os últimos achados
+        self.responder(f"✅ {html.escape(nome)} liberado e já recebeu os últimos achados. Ele recebe os "
+                       f"mesmos alertas que você. Para tirar depois: /pessoas")
 
     def c_recusar(self, arg):
         chat, nome = self._alterar_pessoa(arg, "pendentes", None)
