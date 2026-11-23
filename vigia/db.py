@@ -120,10 +120,10 @@ def precos_referencia(busca_id, limite=80):
 
 def ultimos_alertas(limite=15):
     return _todos("""SELECT a.*, b.termo FROM anuncios a JOIN buscas b ON b.id = a.busca_id
-                     WHERE a.alertado=1 ORDER BY a.visto_em DESC LIMIT ?""", (limite,))
+                     WHERE a.alertado>=1 ORDER BY a.visto_em DESC LIMIT ?""", (limite,))
 
 
 def contar_alertas_hoje():
     hoje = datetime.now().date().isoformat()
-    r = _todos("SELECT COUNT(*) n FROM anuncios WHERE alertado=1 AND visto_em >= ?", (hoje,))
+    r = _todos("SELECT COUNT(*) n FROM anuncios WHERE alertado>=1 AND visto_em >= ?", (hoje,))
     return r[0]["n"]

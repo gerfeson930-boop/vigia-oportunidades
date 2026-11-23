@@ -14,7 +14,10 @@ COMANDOS = [
     ("remove", "Apagar busca: /remove 3"),
     ("desliga", "Desligar uma busca: /desliga 3"),
     ("liga", "Religar uma busca: /liga 3"),
-    ("desconto", "% abaixo da média: /desconto 30 ou /desconto 3 40"),
+    ("faixas", "Ver as faixas de desconto"),
+    ("forte", "% para 🔥 pechincha: /forte 35"),
+    ("desconto", "% para ✅ boa oferta: /desconto 25 ou /desconto 3 40"),
+    ("leve", "% para 💡 resumo: /leve 12 (0 desliga)"),
     ("pacote", "Adicionar as buscas de revenda sugeridas"),
     ("agora", "Rodar as buscas agora"),
     ("pausa", "Pausar tudo"),
@@ -39,7 +42,11 @@ Exemplos:
 <code>/nova rtx 3060 desc 20</code>
 <code>/nova lote eletronicos todos</code>
 
-Como funciona: na 1ª rodada eu só aprendo os preços (sem alertas). Depois aviso anúncio novo que estiver {desc}% abaixo da mediana. Com "urgente", "mudança", "aceito proposta" etc. exijo {bonus} pontos a menos. "Com defeito" fica fora da média e só vira alerta se estiver 50% abaixo.
+Como funciona: na 1ª rodada eu só aprendo os preços (sem alertas). Depois, para cada anúncio novo:
+🔥 <b>{forte}%+</b> abaixo da média: pechincha, com foto, sai na hora e sempre primeiro
+✅ <b>{desc}%+</b>: boa oferta, com foto
+💡 <b>{leve}</b>: entra no resumo do fim da rodada, do maior para o menor desconto
+Ajuste com /forte, /desconto e /leve. Com "urgente", "mudança", "aceito proposta" etc. exijo {bonus} pontos a menos. "Com defeito" fica fora da média e só vira alerta se estiver 50% abaixo.
 Rodo a cada {intervalo} min."""
 
 PACOTE = [
@@ -160,7 +167,9 @@ class Bot:
 
     def _ajuda(self):
         c = config.carregar()
+        leve = f"{c['desconto_leve']}%+" if c["desconto_leve"] else "desligado"
         return AJUDA.format(ml=" + Mercado Livre" if ml.configurado() else "", desc=c["desconto_padrao"],
+                            forte=c["desconto_forte"], leve=leve,
                             bonus=c["bonus_urgencia"], intervalo=c["intervalo_min"])
 
     def _id(self, arg):
@@ -256,11 +265,42 @@ class Bot:
         nums = [int(x) for x in arg.replace("%", " ").split() if x.isdigit()]
         if len(nums) == 1 and 5 <= nums[0] <= 90:
             config.salvar({"desconto_padrao": nums[0]})
-            return self.responder(f"Desconto padrão agora é {nums[0]}%.")
+            return self.c_faixas("")
         if len(nums) == 2 and 5 <= nums[1] <= 90:
             ok = db.atualizar_busca(nums[0], desconto=nums[1])
-            return self.responder(f"Busca #{nums[0]} agora exige {nums[1]}%." if ok else "Não encontrada.")
-        self.responder("Use /desconto 30 (todas) ou /desconto 3 40 (só a busca #3). Entre 5 e 90.")
+            return self.responder(f"Busca #{nums[0]} agora exige {nums[1]}% para ✅ boa oferta."
+                                  if ok else "Não encontrada.")
+        self.responder("Use /desconto 25 (todas) ou /desconto 3 40 (só a busca #3). Entre 5 e 90.")
+
+    def c_forte(self, arg):
+        nums = [int(x) for x in arg.replace("%", " ").split() if x.isdigit()]
+        if len(nums) != 1 or not 10 <= nums[0] <= 90:
+            raise ValueError("use /forte 35 (entre 10 e 90)")
+        config.salvar({"desconto_forte": nums[0]})
+        self.c_faixas("")
+
+    def c_leve(self, arg):
+        nums = [int(x) for x in arg.replace("%", " ").split() if x.isdigit()]
+        if len(nums) != 1 or not (nums[0] == 0 or 5 <= nums[0] <= 60):
+            raise ValueError("use /leve 12 (entre 5 e 60), ou /leve 0 para desligar o resumo")
+        config.salvar({"desconto_leve": nums[0]})
+        self.c_faixas("")
+
+    def c_faixas(self, arg):
+        c = config.carregar()
+        forte = max(c["desconto_forte"], c["desconto_padrao"] + 5)
+        avisos = []
+        if c["desconto_leve"] and c["desconto_leve"] >= c["desconto_padrao"]:
+            avisos.append("⚠️ o resumo (💡) só pega o que fica abaixo da faixa ✅; com esses números ele fica vazio.")
+        if forte != c["desconto_forte"]:
+            avisos.append(f"(🔥 ajustado para {forte}%: precisa ficar pelo menos 5 pontos acima do ✅)")
+        self.responder(
+            "<b>Faixas de desconto</b> (em relação à média de cada produto):\n"
+            f"🔥 pechincha: <b>{forte}%</b> ou mais, com foto, na hora, sempre primeiro  ·  /forte\n"
+            f"✅ boa oferta: <b>{c['desconto_padrao']}%</b> ou mais, com foto  ·  /desconto\n"
+            + (f"💡 resumo da rodada: <b>{c['desconto_leve']}%</b> ou mais  ·  /leve\n" if c["desconto_leve"]
+               else "💡 resumo da rodada: desligado  ·  /leve 12 para ligar\n")
+            + "\n".join(avisos))
 
     def c_agora(self, arg):
         self.monitor.acordar.set()

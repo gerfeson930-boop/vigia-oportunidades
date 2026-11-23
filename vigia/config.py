@@ -13,7 +13,9 @@ LOG = DADOS / "vigia.log"
 
 PADROES = {
     "intervalo_min": 10,      # minutos entre rodadas
-    "desconto_padrao": 25,    # % abaixo da mediana para alertar
+    "desconto_forte": 35,     # % abaixo da mediana: 🔥 pechincha (foto, destaque, vai primeiro)
+    "desconto_padrao": 25,    # % abaixo da mediana: ✅ boa oferta (foto)
+    "desconto_leve": 12,      # % abaixo da mediana: 💡 entra no resumo da rodada (0 desliga)
     "bonus_urgencia": 10,     # pontos de % a menos exigidos quando o anúncio tem "urgente" etc.
     "amostras_min": 15,       # anúncios de referência antes de confiar na média
     "pausado": False,

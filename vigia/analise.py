@@ -110,22 +110,35 @@ def mediana_robusta(precos):
     return statistics.median(filtrados) if filtrados else med
 
 
+FORTE, BOA, LEVE = "forte", "boa", "leve"
+
+
 def avaliar(anuncio, busca, precos_ref, cfg):
-    """Decide se vale alertar. Retorna dict com o motivo, ou None."""
+    """Decide se vale alertar e em que nível. Retorna dict (com "nivel") ou None.
+
+    forte: desconto >= desconto_forte  -> alerta com foto, em destaque, enviado primeiro
+    boa:   desconto >= desconto_padrao -> alerta com foto
+    leve:  desconto >= desconto_leve   -> entra no resumo do fim da rodada
+    """
     defeito = tem_defeito(anuncio.titulo)
     urg = tem_urgencia(anuncio.titulo)
     if busca.get("desconto") == 0:  # modo "todos": avisa qualquer anúncio novo (bom para lotes)
         return {"mediana": mediana_robusta(precos_ref), "amostras": len(precos_ref), "defeito": defeito,
-                "urgencia": urg, "desconto": None, "motivos": ["anúncio novo"], "suspeito": False}
-    desc_exigido = busca.get("desconto") or cfg["desconto_padrao"]
-    if urg:
-        desc_exigido = max(5, desc_exigido - cfg["bonus_urgencia"])
-    if defeito:
-        desc_exigido = max(desc_exigido, 50)
+                "urgencia": urg, "desconto": None, "motivos": ["anúncio novo"], "suspeito": False,
+                "nivel": BOA}
+    desc_boa = busca.get("desconto") or cfg["desconto_padrao"]
+    desc_forte = max(desc_boa + 5, cfg["desconto_forte"])
+    desc_leve = min(desc_boa, cfg["desconto_leve"]) if cfg["desconto_leve"] else None
+    if urg:  # vendedor com pressa: cada faixa exige um pouco menos
+        desc_boa = max(5, desc_boa - cfg["bonus_urgencia"])
+        desc_forte = max(desc_boa + 5, desc_forte - cfg["bonus_urgencia"])
+    if defeito:  # com defeito só interessa se for muito barato, e nunca como "leve"
+        desc_boa = desc_forte = max(desc_boa, 50)
+        desc_leve = None
 
     med = mediana_robusta(precos_ref) if len(precos_ref) >= cfg["amostras_min"] else None
     info = {"mediana": med, "amostras": len(precos_ref), "defeito": defeito,
-            "urgencia": urg, "desconto": None, "motivos": [], "suspeito": False}
+            "urgencia": urg, "desconto": None, "motivos": [], "suspeito": False, "nivel": None}
 
     if med:
         desconto = (1 - anuncio.preco / med) * 100
@@ -133,9 +146,15 @@ def avaliar(anuncio, busca, precos_ref, cfg):
         # Muito abaixo da média quase sempre é outro produto (jogo, controle, capa), isca ou golpe.
         if anuncio.preco < med * (0.2 if defeito else 0.35):
             return None
-        if desconto >= desc_exigido:
+        if desconto >= desc_boa:
             info["motivos"].append(f"{desconto:.0f}% abaixo da média")
+            info["nivel"] = FORTE if desconto >= desc_forte else BOA
             info["suspeito"] = anuncio.preco < med * 0.5 and not defeito
+        elif desc_leve and desconto >= desc_leve:
+            info["motivos"].append(f"{desconto:.0f}% abaixo da média")
+            info["nivel"] = LEVE
     if busca.get("teto") and anuncio.preco <= busca["teto"] and not defeito:
         info["motivos"].append(f"dentro do seu teto de R$ {busca['teto']:,.0f}".replace(",", "."))
+        if info["nivel"] in (None, LEVE):
+            info["nivel"] = BOA
     return info if info["motivos"] else None
