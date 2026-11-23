@@ -1,6 +1,7 @@
 """Comandos do bot no Telegram. Só o primeiro chat que mandar /start é atendido (bot privado)."""
 import html
 import logging
+import re
 
 from . import analise, config, db
 from .fontes import ml
@@ -23,6 +24,7 @@ COMANDOS = [
     ("pausa", "Pausar tudo"),
     ("retoma", "Retomar tudo"),
     ("status", "Situação do vigia"),
+    ("pessoas", "Quem recebe os alertas (compartilhar)"),
     ("ajuda", "Como usar"),
 ]
 
@@ -106,61 +108,115 @@ TECLADO = {
 }
 
 
+# Comandos que só o dono pode usar; quem foi liberado usa o resto (ver, rodar, adicionar busca).
+SO_DONO = {"remove", "desliga", "liga", "desconto", "forte", "leve", "pausa", "retoma", "pacote",
+           "pessoas", "liberar", "recusar", "tirar"}
+
+
+def _nome(msg):
+    de = msg.get("from") or {}
+    nome = " ".join(x for x in (de.get("first_name"), de.get("last_name")) if x) or "Sem nome"
+    return nome + (f" (@{de['username']})" if de.get("username") else "")
+
+
 class Bot:
     def __init__(self, tg, monitor):
         self.tg = tg
         self.monitor = monitor
+        self._atual = None  # chat que mandou o comando em andamento (para responder só a ele)
+        self._usuario = None
+
+    def _usuario_bot(self):
+        if self._usuario is None:
+            try:
+                self._usuario = self.tg.eu().get("username", "")
+            except Exception:
+                return "seu_bot"
+        return self._usuario
 
     def chat(self):
         return config.carregar().get("chat_id")
 
-    def avisar(self, texto, foto=None):
-        chat = self.chat()
-        if not chat:
-            log.info("sem chat cadastrado; alerta descartado")
-            return
+    def destinos(self):
+        """Dono + pessoas liberadas: todos recebem os alertas."""
+        c = config.carregar()
+        chats = [c["chat_id"]] if c.get("chat_id") else []
+        return chats + [int(x) for x in (c.get("convidados") or {})]
+
+    def _enviar(self, chat, texto, foto=None):
         try:
             if foto:
                 self.tg.foto(chat, foto, texto[:1024], TECLADO)
             else:
                 self.tg.mensagem(chat, texto, TECLADO)
         except Exception:
-            log.exception("falha ao enviar mensagem")
+            log.exception("falha ao enviar mensagem para %s", chat)
+
+    def avisar(self, texto, foto=None):
+        """Alerta: vai para o dono e para todas as pessoas liberadas."""
+        chats = self.destinos()
+        if not chats:
+            log.info("sem chat cadastrado; alerta descartado")
+        for chat in chats:
+            self._enviar(chat, texto, foto)
 
     def avisar_album(self, itens):
         """itens: [(url_foto, legenda)]. Manda em álbuns de até 10; o que ficar sem foto vai como texto."""
-        chat = self.chat()
-        if not chat:
-            return
-        sobras = []
-        for i in range(0, len(itens), 10):
-            try:
-                sobras += self.tg.album(chat, itens[i:i + 10])
-            except Exception:
-                log.exception("falha ao enviar álbum")
-                sobras += [legenda for _, legenda in itens[i:i + 10]]
-        if sobras:
-            self.avisar("\n\n".join(sobras))
+        for chat in self.destinos():
+            sobras = []
+            for i in range(0, len(itens), 10):
+                try:
+                    sobras += self.tg.album(chat, itens[i:i + 10])
+                except Exception:
+                    log.exception("falha ao enviar álbum")
+                    sobras += [legenda for _, legenda in itens[i:i + 10]]
+            if sobras:
+                self._enviar(chat, "\n\n".join(sobras))
 
-    def responder(self, texto):
-        self.avisar(texto)
+    def responder(self, texto, foto=None):
+        """Resposta a um comando: só para quem mandou."""
+        if self._atual is not None:
+            self._enviar(self._atual, texto, foto)
+        else:
+            self.avisar(texto, foto)
+
+    def _pedir_acesso(self, msg, chat_id):
+        c = config.carregar()
+        pendentes = c.get("pendentes") or {}
+        if str(chat_id) in pendentes:
+            self.tg.mensagem(chat_id, "⏳ Seu pedido já foi enviado. Aguarde o dono do vigia liberar.")
+            return
+        pendentes[str(chat_id)] = _nome(msg)
+        config.salvar({"pendentes": pendentes})
+        self.tg.mensagem(chat_id, "👋 Pedido enviado ao dono deste vigia. Assim que ele liberar, "
+                                  "você começa a receber os alertas aqui.")
+        self._enviar(c["chat_id"], f"👤 <b>{html.escape(_nome(msg))}</b> quer usar o vigia "
+                                   f"(receber os mesmos alertas que você).\n\n"
+                                   f"✅ Liberar: /liberar_{chat_id}\n❌ Recusar: /recusar_{chat_id}")
 
     def tratar(self, msg):
         chat_id = msg["chat"]["id"]
         texto = (msg.get("text") or "").strip()
-        dono = self.chat()
+        c = config.carregar()
+        dono = c.get("chat_id")
         if dono is None and texto.startswith("/start"):
             config.salvar({"chat_id": chat_id})
             self.tg.mensagem(chat_id, "✅ Pronto, este chat agora recebe os alertas.", TECLADO)
             if not db.listar_buscas():  # já sobe as buscas de revenda e começa a vigiar
+                self._atual = chat_id
                 self.c_pacote("")
                 self.monitor.acordar.set()
                 self.responder("▶️ Primeira rodada começando agora. Ela só aprende os preços e te "
                                "manda a média de cada busca; os alertas vêm a partir da segunda.")
             return
-        if chat_id != dono:
-            self.tg.mensagem(chat_id, "Este bot é privado.")
+        e_dono = chat_id == dono
+        if not e_dono and str(chat_id) not in (c.get("convidados") or {}):
+            if msg["chat"].get("type") == "private" and dono is not None:
+                self._pedir_acesso(msg, chat_id)
+            else:
+                self.tg.mensagem(chat_id, "Este bot é privado.")
             return
+        self._atual = chat_id
         if texto in BOTOES:
             cmd, arg = BOTOES[texto], ""
         elif not texto.startswith("/"):
@@ -169,6 +225,11 @@ class Bot:
             cmd, _, arg = texto.partition(" ")
             cmd = cmd[1:].split("@")[0].lower()
             arg = arg.strip()
+            m = re.fullmatch(r"(liberar|recusar|tirar)_(-?\d+)", cmd)  # comandos clicáveis
+            if m:
+                cmd, arg = m.group(1), m.group(2)
+        if cmd in SO_DONO and not e_dono:
+            return self.responder("🔒 Só o dono do vigia pode fazer isso.")
         fn = getattr(self, f"c_{cmd}", None)
         if not fn:
             return self.responder("Comando desconhecido. /ajuda")
@@ -180,12 +241,22 @@ class Bot:
             log.exception("erro no comando %s", cmd)
             self.responder(f"Deu erro: {html.escape(str(e))}")
 
-    def _ajuda(self):
+    def _ajuda(self, dono=None):
         c = config.carregar()
+        if dono is None:
+            dono = self._atual is None or self._atual == c.get("chat_id")
         leve = f"{c['desconto_leve']}%+" if c["desconto_leve"] else "desligado"
-        return AJUDA.format(ml=" + Mercado Livre" if ml.configurado() else "", desc=c["desconto_padrao"],
-                            forte=c["desconto_forte"], leve=leve,
-                            bonus=c["bonus_urgencia"], intervalo=c["intervalo_min"])
+        texto = AJUDA.format(ml=" + Mercado Livre" if ml.configurado() else "", desc=c["desconto_padrao"],
+                             forte=c["desconto_forte"], leve=leve,
+                             bonus=c["bonus_urgencia"], intervalo=c["intervalo_min"])
+        if dono:
+            texto += ("\n\n👥 <b>Compartilhar:</b> mande o link t.me/" + self._usuario_bot()
+                      + " para um amigo; quando ele mandar /start, você recebe o pedido para liberar. "
+                        "Veja e gerencie em /pessoas.")
+        else:
+            texto += ("\n\n👥 Você usa o vigia de outra pessoa: recebe os mesmos alertas, pode ver achados, "
+                      "buscas e status e adicionar produtos. Apagar buscas e mudar as faixas é com o dono.")
+        return texto
 
     def _id(self, arg):
         try:
@@ -218,7 +289,7 @@ class Bot:
                      f"📍 {html.escape(a.get('local') or '')}  ·  visto {a['visto_em'][8:10]}/{a['visto_em'][5:7]}"
                      f"\n🔎 {html.escape(a['termo'])}\n"
                      f'<a href="{html.escape(a["url"])}">Abrir anúncio</a>')
-            self.avisar(texto, a.get("foto") or None)
+            self.responder(texto, a.get("foto") or None)
 
     def c_nova(self, arg):
         bid, termo = self._criar(arg)
@@ -329,6 +400,53 @@ class Bot:
         config.salvar({"pausado": False})
         self.monitor.acordar.set()
         self.responder("▶️ Vigia retomado.")
+
+    # ---- pessoas ----
+    def _alterar_pessoa(self, arg, de, para):
+        try:
+            chat = str(int(arg))
+        except ValueError:
+            raise ValueError("pessoa não encontrada; veja /pessoas")
+        c = config.carregar()
+        origem, destino = dict(c.get(de) or {}), dict(c.get(para) or {}) if para else None
+        if chat not in origem:
+            raise ValueError("pessoa não encontrada (talvez já tenha sido tratada); veja /pessoas")
+        nome = origem.pop(chat)
+        mudancas = {de: origem}
+        if para:
+            destino[chat] = nome
+            mudancas[para] = destino
+        config.salvar(mudancas)
+        return int(chat), nome
+
+    def c_liberar(self, arg):
+        chat, nome = self._alterar_pessoa(arg, "pendentes", "convidados")
+        self._enviar(chat, "✅ Liberado! A partir de agora você recebe os alertas do vigia aqui.\n\n" + self._ajuda(False))
+        self.responder(f"✅ {html.escape(nome)} liberado. Ele recebe os mesmos alertas que você. "
+                       f"Para tirar depois: /pessoas")
+
+    def c_recusar(self, arg):
+        chat, nome = self._alterar_pessoa(arg, "pendentes", None)
+        self._enviar(chat, "O dono do vigia não liberou o acesso.")
+        self.responder(f"❌ Pedido de {html.escape(nome)} recusado.")
+
+    def c_tirar(self, arg):
+        chat, nome = self._alterar_pessoa(arg, "convidados", None)
+        self._enviar(chat, "Seu acesso ao vigia foi encerrado pelo dono.")
+        self.responder(f"🚪 {html.escape(nome)} não recebe mais os alertas.")
+
+    def c_pessoas(self, arg):
+        c = config.carregar()
+        conv, pend = c.get("convidados") or {}, c.get("pendentes") or {}
+        linhas = ["👥 <b>Pessoas com acesso</b> (recebem os mesmos alertas que você):"]
+        linhas += [f"• {html.escape(n)} · tirar: /tirar_{i}" for i, n in conv.items()] or ["• ninguém ainda"]
+        if pend:
+            linhas.append("\n⏳ <b>Pedidos aguardando:</b>")
+            linhas += [f"• {html.escape(n)} · /liberar_{i} · /recusar_{i}" for i, n in pend.items()]
+        linhas.append("\nPara convidar alguém, mande o link do bot: "
+                      f"t.me/{self._usuario_bot()}. Quando a pessoa mandar /start, "
+                      "o pedido aparece aqui para você liberar.")
+        self.responder("\n".join(linhas))
 
     def c_status(self, arg):
         import time

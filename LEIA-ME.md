@@ -25,6 +25,14 @@ anúncios parecidos, ele te avisa no Telegram com foto, preço e link.
 | `/desconto 3 40` | % de boa oferta só para a busca #3 |
 | `/agora` · `/pausa` · `/retoma` · `/status` | controle do vigia |
 
+## Compartilhar com um amigo
+
+Mande o link do seu bot (`t.me/<usuario_do_bot>`) ou encaminhe o contato dele. Quando o amigo mandar
+`/start`, chega para você um pedido com **/liberar_…** e **/recusar_…** (é só tocar). Liberado, ele recebe
+os mesmos alertas que você e pode ver achados, buscas e status e adicionar produtos; apagar buscas,
+mudar faixas e pausar continua só com você. Veja e tire pessoas em `/pessoas`. Os alertas dele também
+dependem do seu PC estar ligado.
+
 ## Como ele decide
 
 - **1ª rodada de cada busca (e de cada plataforma nova):** só aprende os preços, sem alertas.
