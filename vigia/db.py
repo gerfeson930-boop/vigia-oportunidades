@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS anuncios (
 );
 CREATE INDEX IF NOT EXISTS ix_anuncios_busca ON anuncios (busca_id, visto_em);
 """)
+if "foto" not in {r[1] for r in _con.execute("PRAGMA table_info(anuncios)")}:
+    _con.execute("ALTER TABLE anuncios ADD COLUMN foto TEXT NOT NULL DEFAULT ''")
+if "local" not in {r[1] for r in _con.execute("PRAGMA table_info(anuncios)")}:
+    _con.execute("ALTER TABLE anuncios ADD COLUMN local TEXT NOT NULL DEFAULT ''")
 _con.commit()
 
 
@@ -97,12 +101,15 @@ def anuncio_existente(fonte, ad_id, busca_id):
 
 
 def gravar_anuncio(a, busca_id, valido_media, alertado=False):
-    _exec("""INSERT INTO anuncios (fonte, ad_id, busca_id, titulo, preco, url, valido_media, alertado, visto_em)
-             VALUES (?,?,?,?,?,?,?,?,?)
+    _exec("""INSERT INTO anuncios (fonte, ad_id, busca_id, titulo, preco, url, valido_media, alertado, visto_em,
+                                   foto, local)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)
              ON CONFLICT(fonte, ad_id, busca_id) DO UPDATE SET
                preco=excluded.preco, titulo=excluded.titulo, visto_em=excluded.visto_em,
+               foto=excluded.foto, local=excluded.local,
                alertado=MAX(anuncios.alertado, excluded.alertado)""",
-          (a.fonte, a.id, busca_id, a.titulo, a.preco, a.url, int(valido_media), int(alertado), _agora()))
+          (a.fonte, a.id, busca_id, a.titulo, a.preco, a.url, int(valido_media), int(alertado), _agora(),
+           a.foto or "", a.local or ""))
 
 
 def precos_referencia(busca_id, limite=80):

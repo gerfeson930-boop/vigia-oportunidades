@@ -29,10 +29,14 @@ def formatar_alerta(a, busca, info, motivo_extra=None):
         marcas.append("🔧 com defeito / para conserto")
     if info["urgencia"]:
         marcas.append("⏱ vendedor com pressa: " + ", ".join(info["urgencia"]))
+    preco = f"💰 <b>{_brl(a.preco)}</b>"
+    if info["mediana"] and info.get("desconto") is not None:
+        preco += f"  (média {_brl(info['mediana'])}, <b>-{info['desconto']:.0f}%</b>)"
+    elif info["mediana"]:
+        preco += f"  (média {_brl(info['mediana'])})"
     linhas = [
+        preco,
         f"🔔 <b>{e(a.titulo)}</b>",
-        f"💰 <b>{_brl(a.preco)}</b>" + (f"  ·  média {_brl(info['mediana'])} ({info['amostras']} anúncios)"
-                                        if info["mediana"] else ""),
         "✅ " + "; ".join(info["motivos"] + ([motivo_extra] if motivo_extra else [])),
         *marcas,
         f"📍 {e(a.local)}  ·  {a.fonte.upper()}  ·  {e(a.data)}",
@@ -152,7 +156,7 @@ class Monitor:
             except Exception as e:  # uma busca com problema não derruba as outras
                 log.exception("erro na busca #%s", b["id"])
                 self.ultimo_erro = f"{datetime.now():%d/%m %H:%M} busca #{b['id']}: {e}"
-            time.sleep(random.uniform(4, 10))  # ritmo humano entre buscas
+            time.sleep(random.uniform(2, 5))  # pausa entre buscas, para não martelar o site
         if resumos:  # buscas novas: um resumo só, em vez de uma mensagem por busca
             cab = (f"📊 <b>Preços aprendidos</b> ({len(resumos)} buscas novas). A partir da próxima "
                    f"rodada aviso o que aparecer {cfg['desconto_padrao']}% abaixo da média.\n")

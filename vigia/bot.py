@@ -44,18 +44,43 @@ Rodo a cada {intervalo} min."""
 
 PACOTE = [
     # modelos específicos dão médias mais justas que termos genéricos ("thinkpad" mistura T410 e P16)
-    "thinkpad t480", "thinkpad t490", "thinkpad t14", "thinkpad e14",
-    "latitude 5420", "latitude 7420", "macbook air m1", "macbook air m2",
-    "iphone 13 -pro -max -mini", "iphone 14 -pro -max -plus", "iphone 13 pro -max",
-    "galaxy s23 -ultra -fe", "galaxy a54",
-    "ps5 -jogo", "xbox series s", "nintendo switch -jogo",
-    "rtx 3060 -ti", "rtx 3060 ti", "rtx 3070 -ti", "rtx 4060 -ti", "ssd nvme 1tb",
-    "monitor 144hz 24", "monitor 144hz 27",
-    "ipad", "apple watch", "airpods",
-    "parafusadeira dewalt", "furadeira makita",
-    "patinete eletrico", "bicicleta eletrica",
-    "camera sony alpha", "canon eos",
-    "cadeira ergonomica",
+    # notebooks
+    "thinkpad t470", "thinkpad t480", "thinkpad t490", "thinkpad t14", "thinkpad e14", "thinkpad x13",
+    "latitude 5490", "latitude 7490", "latitude 5420", "latitude 7420",
+    "macbook air m1", "macbook air m2", "macbook air m3", "macbook pro m1",
+    "notebook gamer rtx 3050", "ideapad gaming",
+    # iPhone
+    "iphone 11 -pro -max", "iphone 12 -pro -max -mini", "iphone 12 pro -max",
+    "iphone 13 -pro -max -mini", "iphone 13 pro -max", "iphone 13 pro max",
+    "iphone 14 -pro -max -plus", "iphone 14 pro -max", "iphone 15 -pro -max -plus", "iphone 15 pro -max",
+    # Samsung
+    "galaxy s21 fe", "galaxy s22 -ultra", "galaxy s23 -ultra -fe", "galaxy s23 ultra",
+    "galaxy s24 -ultra -fe", "galaxy a15", "galaxy a34", "galaxy a54", "galaxy a55",
+    # consoles
+    "ps5 -jogo", "ps5 slim -jogo", "ps4 pro -jogo", "xbox series s", "xbox series x -jogo",
+    "nintendo switch -jogo -oled", "nintendo switch oled -jogo", "steam deck",
+    # placas de vídeo e peças
+    "rtx 3060 -ti", "rtx 3060 ti", "rtx 3070 -ti", "rtx 3070 ti", "rtx 4060 -ti", "rtx 4060 ti",
+    "rtx 4070", "rx 6600", "ryzen 5 5600", "ryzen 7 5700x", "i5 12400",
+    "ssd nvme 1tb", "memoria ddr4 16gb", "memoria ddr5",
+    # monitores
+    "monitor 144hz 24", "monitor 144hz 27", "monitor 165hz", "monitor ultrawide",
+    # tablets
+    "ipad 9 -air -pro -mini", "ipad 10 -air -pro -mini", "ipad air", "ipad pro", "galaxy tab s6 lite", "galaxy tab s9",
+    # relógios
+    "apple watch se", "apple watch series 8", "apple watch series 9", "galaxy watch 5", "galaxy watch 6",
+    # fones e caixas de som
+    "airpods pro", "airpods 3", "jbl charge 5", "jbl flip 6", "jbl boombox",
+    "sony wh 1000xm4", "sony wh 1000xm5",
+    # ferramentas
+    "parafusadeira dewalt", "parafusadeira makita", "furadeira makita", "furadeira dewalt",
+    "martelete bosch", "esmerilhadeira bosch", "serra makita",
+    # bikes e patinetes
+    "patinete eletrico", "patinete xiaomi", "bicicleta eletrica", "bike speed", "mountain bike aro 29",
+    # câmeras e drones
+    "sony a6400", "canon t7", "nikon d3500", "gopro hero", "drone dji mini", "lente canon",
+    # escritório
+    "cadeira ergonomica", "cadeira gamer", "mesa escritorio",
     "lote eletronicos todos", "lote celulares todos", "lote notebooks todos",
     "queima de estoque -roupa -roupas todos", "fechamento de loja -ponto -aluguel -roupa todos",
 ]
@@ -89,7 +114,7 @@ class Bot:
             return
         try:
             if foto:
-                self.tg.foto(chat, foto, texto[:1024])
+                self.tg.foto(chat, foto, texto[:1024], TECLADO)
             else:
                 self.tg.mensagem(chat, texto, TECLADO)
         except Exception:
@@ -158,17 +183,18 @@ class Bot:
         self.responder(self._ajuda())
 
     def c_achados(self, arg):
-        itens = db.ultimos_alertas(15)
+        itens = db.ultimos_alertas(10)
         if not itens:
             return self.responder("Nenhum achado ainda. Os alertas começam depois da primeira rodada "
                                   "de cada busca.")
-        linhas = ["🔔 <b>Últimos achados</b> (mais recentes primeiro)"]
-        for a in itens:
+        self.responder(f"🔔 <b>Últimos {len(itens)} achados</b> (do mais antigo ao mais recente):")
+        for a in reversed(itens):  # o mais recente fica por último, perto do campo de digitar
             preco = f"R$ {a['preco']:,.0f}".replace(",", ".")
-            linhas.append(f'• <a href="{html.escape(a["url"])}">{html.escape(a["titulo"][:60])}</a>'
-                          f" — <b>{preco}</b> · {a['visto_em'][8:10]}/{a['visto_em'][5:7]}"
-                          f" · {html.escape(a['termo'])}")
-        self.responder("\n".join(linhas))
+            texto = (f"💰 <b>{preco}</b>\n🔔 <b>{html.escape(a['titulo'])}</b>\n"
+                     f"📍 {html.escape(a.get('local') or '')}  ·  visto {a['visto_em'][8:10]}/{a['visto_em'][5:7]}"
+                     f"\n🔎 {html.escape(a['termo'])}\n"
+                     f'<a href="{html.escape(a["url"])}">Abrir anúncio</a>')
+            self.avisar(texto, a.get("foto") or None)
 
     def c_nova(self, arg):
         bid, termo = self._criar(arg)
