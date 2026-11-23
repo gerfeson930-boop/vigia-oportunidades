@@ -1,0 +1,5 @@
+# token, banco, log e perfil do navegador ficam só na máquina
+dados/
+.venv/
+__pycache__/
+*.pyc

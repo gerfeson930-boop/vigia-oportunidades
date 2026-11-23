@@ -1,0 +1,62 @@
+name: vigia
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # a cada 10 min (o GitHub pode atrasar alguns minutos)
+  workflow_dispatch: {}       # botão "Run workflow" para rodar na hora
+
+concurrency:
+  group: vigia
+  cancel-in-progress: false   # nunca duas rodadas ao mesmo tempo
+
+permissions:
+  contents: read
+
+jobs:
+  rodar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Dependências
+        run: pip install -r requirements.txt
+
+      - name: Cache do navegador
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Navegador
+        run: python -m playwright install --with-deps chromium
+
+      # Estado entre execuções (buscas, histórico de preços, chat do dono). Fica no cache do
+      # Actions, que não é público nem vai para o repositório.
+      - name: Restaurar estado
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            dados/vigia.db
+            dados/config.json
+          key: vigia-dados-${{ github.run_id }}
+          restore-keys: vigia-dados-
+
+      - name: Rodada
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        run: python -m vigia --uma-vez
+
+      - name: Salvar estado
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            dados/vigia.db
+            dados/config.json
+          key: vigia-dados-${{ github.run_id }}
