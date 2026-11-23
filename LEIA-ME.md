@@ -25,6 +25,27 @@ anúncios parecidos, ele te avisa no Telegram com foto, preço e link.
 | `/desconto 3 40` | % de boa oferta só para a busca #3 |
 | `/agora` · `/pausa` · `/retoma` · `/status` | controle do vigia |
 
+## Rodar 24 h (sem o notebook ligado)
+
+Precisa de um computador Linux sempre ligado: uma **VPS no Brasil** (ex.: Hostinger, Magalu Cloud,
+~R$ 30-40/mês; Ubuntu 22.04 ou 24.04, 2 GB de RAM ou mais) ou um **mini PC/Raspberry Pi** em casa.
+Com o endereço `usuario@ip` e a senha do servidor em mãos, dê dois cliques em
+**`enviar_para_servidor.bat`**: ele instala tudo no servidor, **testa se OLX, Enjoei, Pelando, KaBuM e
+leilões respondem de lá**, e só se você confirmar copia seus dados (bot, buscas, histórico, login dos
+grupos), liga o vigia no servidor e desliga o do PC. No servidor ele roda como serviço (`vigia`):
+volta sozinho se cair ou se o servidor reiniciar.
+
+## Fontes
+
+| Fonte | O que traz |
+|---|---|
+| OLX (MG) | usados, comparados com a média |
+| Enjoei | usados do Brasil todo |
+| Pelando | promoções de lojas (Amazon, Mercado Livre, Magalu...), comparadas com a média dos usados |
+| KaBuM | produto novo abaixo da média dos usados e **queda de preço** de 10%+ |
+| Leilões Sodré Santoro | cada **lote novo** com as palavras de `/leilao` (foto, lance, data) |
+| Seus grupos do Telegram | posts de promoção dos grupos/canais que você escolher (`configurar_grupos.bat`) |
+
 ## Compartilhar com um amigo
 
 Mande o link do seu bot (`t.me/<usuario_do_bot>`) ou encaminhe o contato dele. Quando o amigo mandar
