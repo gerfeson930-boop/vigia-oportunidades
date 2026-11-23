@@ -65,11 +65,11 @@ PACOTE = [
     "iphone 13 -pro -max -mini", "iphone 13 pro -max", "iphone 13 pro max",
     "iphone 14 -pro -max -plus", "iphone 14 pro -max", "iphone 15 -pro -max -plus", "iphone 15 pro -max",
     # Samsung
-    "galaxy s21 fe", "galaxy s22 -ultra", "galaxy s23 -ultra -fe", "galaxy s23 ultra",
-    "galaxy s24 -ultra -fe", "galaxy a15", "galaxy a34", "galaxy a54", "galaxy a55",
+    "galaxy s21 fe", "galaxy s22 -ultra -plus", "galaxy s23 -ultra -fe -plus", "galaxy s23 ultra",
+    "galaxy s24 -ultra -fe -plus", "galaxy a15", "galaxy a34", "galaxy a54", "galaxy a55",
     # consoles
     "ps5 -jogo", "ps5 slim -jogo", "ps4 pro -jogo", "xbox series s", "xbox series x -jogo",
-    "nintendo switch -jogo -oled", "nintendo switch oled -jogo", "steam deck",
+    "nintendo switch -jogo -oled -lite", "nintendo switch lite -jogo", "nintendo switch oled -jogo", "steam deck",
     # placas de vídeo e peças
     "rtx 3060 -ti", "rtx 3060 ti", "rtx 3070 -ti", "rtx 3070 ti", "rtx 4060 -ti", "rtx 4060 ti",
     "rtx 4070", "rx 6600", "ryzen 5 5600", "ryzen 7 5700x", "i5 12400",

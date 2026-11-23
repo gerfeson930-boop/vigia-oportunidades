@@ -46,6 +46,7 @@ PALAVRAS_VAZIAS = {"de", "da", "do", "das", "dos", "e", "com", "para", "pra", "a
 def normalizar(txt):
     txt = unicodedata.normalize("NFKD", txt.lower())
     txt = "".join(c for c in txt if not unicodedata.combining(c))
+    txt = re.sub(r"(?<=[a-z0-9])\+", " plus ", txt)  # "S24+" -> "s24 plus"
     txt = re.sub(r"[^a-z0-9]+", " ", txt).strip()
     for padrao, troca in SINONIMOS:
         txt = re.sub(padrao, troca, txt)
@@ -176,6 +177,11 @@ def avaliar(anuncio, busca, precos_ref, cfg):
     desc_boa = busca.get("desconto") or cfg["desconto_padrao"]
     desc_forte = max(desc_boa + 5, cfg["desconto_forte"])
     desc_leve = min(desc_boa, cfg["desconto_leve"]) if cfg["desconto_leve"] else None
+    # plataformas onde o comprador tem custo extra (frete, taxa) exigem mais desconto em todas as faixas
+    extra = (cfg.get("exigencia_extra") or {}).get(anuncio.fonte, 0)
+    desc_boa, desc_forte = desc_boa + extra, desc_forte + extra
+    if desc_leve:
+        desc_leve += extra
     if urg:  # vendedor com pressa: cada faixa exige um pouco menos
         desc_boa = max(5, desc_boa - cfg["bonus_urgencia"])
         desc_forte = max(desc_boa + 5, desc_forte - cfg["bonus_urgencia"])

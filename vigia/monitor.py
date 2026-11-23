@@ -202,7 +202,7 @@ class Monitor:
             # produto novo de loja não entra na média dos usados
             db.gravar_anuncio(a, busca["id"], valido_media=not defeito and not promo, alertado=nivel)
             if info:
-                alertas.append({"nivel": info["nivel"], "desconto": info.get("desconto") or 0,
+                alertas.append({"nivel": info["nivel"], "desconto": info.get("desconto") or 0, "fonte": a.fonte,
                                 "texto": formatar_alerta(a, busca, info, extra), "foto": a.foto,
                                 "linha": linha_resumo(a, info) + (f" · 📉 {html.escape(extra)}" if extra else "")})
         if fontes_ok - busca["fontes_base"]:
@@ -300,7 +300,8 @@ class Monitor:
             for al in sorted(alertas, key=lambda x: (ordem[x["nivel"]], -x["desconto"])):
                 if al["nivel"] == analise.FORTE:
                     self.avisar(al["texto"], al["foto"] or None)  # pechincha sai sempre e na hora
-                elif al["nivel"] == analise.BOA and boas_enviadas < MAX_BOAS_RODADA:
+                elif (al["nivel"] == analise.BOA and boas_enviadas < MAX_BOAS_RODADA
+                      and al["fonte"] not in (cfg.get("so_pechincha_com_foto") or [])):
                     self.avisar(al["texto"], al["foto"] or None)
                     boas_enviadas += 1
                 else:

@@ -17,6 +17,10 @@ PADROES = {
     "desconto_forte": 35,     # % abaixo da mediana: 🔥 pechincha (foto, destaque, vai primeiro)
     "desconto_padrao": 25,    # % abaixo da mediana: ✅ boa oferta (foto)
     "desconto_leve": 12,      # % abaixo da mediana: 💡 entra no resumo da rodada (0 desliga)
+    # Enjoei: comprador paga frete e taxa e não negocia -> exige 10 pontos a mais e só manda foto
+    # quando for pechincha (o resto vai para o resumo)
+    "exigencia_extra": {"enjoei": 10},
+    "so_pechincha_com_foto": ["enjoei"],
     "bonus_urgencia": 10,     # pontos de % a menos exigidos quando o anúncio tem "urgente" etc.
     "amostras_min": 15,       # anúncios de referência antes de confiar na média
     "pausado": False,
