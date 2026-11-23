@@ -9,7 +9,12 @@ from urllib.parse import quote
 from .base import Anuncio, FonteBloqueada
 
 log = logging.getLogger("vigia.enjoei")
-FOTO = "https://photos.enjoei.com.br/public/600x600/{}"
+# Só alguns tamanhos existem (150, 300, 800...); o id precisa do "=" de preenchimento do base64.
+FOTO = "https://photos.enjoei.com.br/public/800x800/{}"
+
+
+def url_foto(id_publico):
+    return FOTO.format(id_publico + "=" * (-len(id_publico) % 4))
 
 
 def montar_url(termo, recentes):
@@ -30,7 +35,7 @@ def _converter(no):
         fonte="enjoei", id=str(no["id"]), titulo=titulo, preco=preco,
         url=f"https://www.enjoei.com.br/p/{no['path']}", local="envia para todo o Brasil",
         data="novo" if no.get("used") is False else "usado",
-        foto=FOTO.format(foto_id) if foto_id else "",
+        foto=url_foto(foto_id) if foto_id else "",
     )
 
 
