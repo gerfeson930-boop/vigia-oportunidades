@@ -211,6 +211,7 @@ class Bot:
             return
         e_dono = chat_id == dono
         if not e_dono and str(chat_id) not in (c.get("convidados") or {}):
+            log.info("mensagem de quem ainda não tem acesso (tipo de chat: %s)", msg["chat"].get("type"))
             if msg["chat"].get("type") == "private" and dono is not None:
                 self._pedir_acesso(msg, chat_id)
             else:
