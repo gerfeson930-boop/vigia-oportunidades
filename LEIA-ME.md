@@ -1,4 +1,4 @@
-# Vigia de Oportunidades (revenda: OLX em MG + Enjoei Brasil todo)
+# Vigia de Oportunidades (revenda: OLX em MG, Enjoei Brasil todo e promoções do Pelando)
 
 Fica checando o **OLX de Minas Gerais** e o **Enjoei** (que envia para o Brasil todo), com 3 buscas ao
 mesmo tempo, e repete 10 minutos depois de cada rodada. Quando aparece um anúncio abaixo da média de
@@ -34,6 +34,9 @@ anúncios parecidos, ele te avisa no Telegram com foto, preço e link.
   - ✅ **25%+:** boa oferta, com foto
   - 💡 **12%+:** entra num resumo no fim da rodada, do maior para o menor desconto
 - Também avisa quando um anúncio já conhecido baixa de preço.
+- **Promoções do Pelando** (produto novo em loja, postadas nas últimas 48 h) são comparadas com a
+  média dos **usados**: 🔥 se o novo sai bem abaixo dela, ✅ se sai mais barato que ela, 💡 no resumo
+  se for só uma promoção. Elas não entram na média dos usados.
 - Ignora máquina inteira em busca de peça ("pc gamer rtx 3060" na busca "rtx 3060"), fone avulso
   ("lado L") e termos típicos de réplica.
 - Se uma plataforma bloquear, fica 1 hora sem acessá-la e volta a fazer 1 busca por vez nesse tempo.
