@@ -58,7 +58,15 @@ class Telegram:
             raise RuntimeError(f"Telegram sendPhoto {e.code}: {e.read().decode(errors='replace')[:300]}") from None
 
     def foto(self, chat_id, url_foto, legenda, teclado=None):
-        """Baixa a foto aqui e envia o arquivo; se falhar, tenta pelo link; por último, só texto."""
+        """Baixa a foto aqui e envia o arquivo; se falhar, tenta pelo link; por último, só texto.
+
+        url_foto também pode ser a imagem já baixada (bytes), como a foto de um post de grupo."""
+        if isinstance(url_foto, (bytes, bytearray)):
+            try:
+                return self._enviar_arquivo(chat_id, bytes(url_foto), legenda, teclado)
+            except Exception as e:
+                log.warning("envio da foto do post falhou (%s); mandando texto", e)
+                return self.mensagem(chat_id, legenda, teclado)
         try:
             req = urllib.request.Request(url_foto, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=20) as r:

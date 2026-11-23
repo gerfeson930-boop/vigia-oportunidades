@@ -57,6 +57,10 @@ def main():
 
     t = threading.Thread(target=monitor.executar, name="monitor", daemon=True)
     t.start()
+    from . import grupos
+    if grupos.configurado():  # grupos/canais de promoção lidos pela conta do usuário
+        bot.leitor = grupos.LeitorGrupos(bot.avisar)
+        threading.Thread(target=bot.leitor.executar, name="grupos", daemon=True).start()
     logging.info("vigia iniciado como @%s", tg.eu().get("username"))
     try:
         bot.executar(monitor.parar)

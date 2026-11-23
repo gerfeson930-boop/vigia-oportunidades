@@ -25,6 +25,7 @@ COMANDOS = [
     ("retoma", "Retomar tudo"),
     ("status", "Situação do vigia"),
     ("pessoas", "Quem recebe os alertas (compartilhar)"),
+    ("grupos", "Grupos de promoção que eu leio"),
     ("ajuda", "Como usar"),
 ]
 
@@ -478,6 +479,26 @@ class Bot:
                       "o pedido aparece aqui para você liberar.")
         self.responder("\n".join(linhas))
 
+    def _estado_grupos(self, cfg):
+        lidos = cfg.get("tg_grupos") or {}
+        if not lidos:
+            return "desligado (rode configurar_grupos.bat no PC)"
+        leitor = getattr(self, "leitor", None)
+        estado = "lendo" if leitor and leitor.ativo else "parado"
+        erro = f" · erro: {html.escape(leitor.ultimo_erro[:100])}" if leitor and leitor.ultimo_erro else ""
+        return f"{estado} {len(lidos)} ({html.escape(', '.join(list(lidos.values())[:5]))}){erro}"
+
+    def c_grupos(self, arg):
+        cfg = config.carregar()
+        lidos = cfg.get("tg_grupos") or {}
+        if not lidos:
+            return self.responder("Nenhum grupo de promoção ligado. No PC, dê dois cliques em "
+                                  "<b>configurar_grupos.bat</b> para escolher os grupos.")
+        self.responder("📣 <b>Grupos e canais de promoção que eu leio</b>:\n"
+                       + "\n".join(f"• {html.escape(n)}" for n in lidos.values())
+                       + "\n\nAviso aqui quando um post traz um produto das suas buscas por um preço "
+                         "bom (comparado com a média dos usados). Para mudar a lista: configurar_grupos.bat no PC.")
+
     def c_status(self, arg):
         import time
         cfg = config.carregar()
@@ -488,7 +509,7 @@ class Bot:
             f"{ativas} buscas ativas, a cada {cfg['intervalo_min']} min",
             f"última rodada: {ult:%d/%m %H:%M}" if ult else "última rodada: ainda não terminou nenhuma",
             f"alertas hoje: {db.contar_alertas_hoje()}",
-            "Mercado Livre: " + ("ligado" if ml.configurado() else "desligado (rode configurar_ml.bat)"),
+            "Grupos de promoção: " + self._estado_grupos(cfg),
         ]
         for fonte, ate in self.monitor.bloqueio_ate.items():
             if ate > time.time():
