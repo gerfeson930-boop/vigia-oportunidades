@@ -75,5 +75,50 @@ class Telegram:
             log.warning("foto falhou, mandando texto: %s", e)
             return self.mensagem(chat_id, legenda, teclado)
 
+    @staticmethod
+    def _baixar(url):
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.read()
+
+    def album(self, chat_id, itens):
+        """Envia até 10 fotos num álbum (sendMediaGroup), cada uma com sua legenda.
+
+        itens: [(url_foto, legenda_html)]. As fotos são baixadas aqui e enviadas como arquivo.
+        Devolve as legendas que não entraram no álbum (foto indisponível), para irem como texto.
+        """
+        arquivos, media, sem_foto = [], [], []
+        for url, legenda in itens[:10]:
+            try:
+                arquivos.append(self._baixar(url))
+                media.append({"type": "photo", "media": f"attach://f{len(arquivos) - 1}",
+                              "caption": legenda[:1024], "parse_mode": "HTML"})
+            except Exception as e:
+                log.warning("foto do álbum indisponível (%s)", e)
+                sem_foto.append(legenda)
+        if len(media) == 1:  # álbum precisa de 2+ fotos; com 1, vai como foto simples
+            self._enviar_arquivo(chat_id, arquivos[0], media[0]["caption"])
+            return sem_foto
+        if not media:
+            return sem_foto
+        limite = uuid.uuid4().hex
+        corpo = b""
+        for nome, valor in (("chat_id", str(chat_id)), ("media", json.dumps(media))):
+            corpo += (f"--{limite}\r\nContent-Disposition: form-data; name=\"{nome}\"\r\n\r\n"
+                      f"{valor}\r\n").encode()
+        for i, conteudo in enumerate(arquivos):
+            corpo += (f"--{limite}\r\nContent-Disposition: form-data; name=\"f{i}\"; filename=\"f{i}.jpg\"\r\n"
+                      f"Content-Type: image/jpeg\r\n\r\n").encode() + conteudo + b"\r\n"
+        corpo += f"--{limite}--\r\n".encode()
+        req = urllib.request.Request(f"{self.base}/sendMediaGroup", data=corpo,
+                                     headers={"Content-Type": f"multipart/form-data; boundary={limite}"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            log.warning("álbum falhou: %s %s", e.code, e.read().decode(errors="replace")[:200])
+            return [m["caption"] for m in media] + sem_foto
+        return sem_foto
+
     def definir_comandos(self, comandos):
         self._chamar("setMyCommands", {"commands": [{"command": c, "description": d} for c, d in comandos]})

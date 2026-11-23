@@ -127,6 +127,21 @@ class Bot:
         except Exception:
             log.exception("falha ao enviar mensagem")
 
+    def avisar_album(self, itens):
+        """itens: [(url_foto, legenda)]. Manda em álbuns de até 10; o que ficar sem foto vai como texto."""
+        chat = self.chat()
+        if not chat:
+            return
+        sobras = []
+        for i in range(0, len(itens), 10):
+            try:
+                sobras += self.tg.album(chat, itens[i:i + 10])
+            except Exception:
+                log.exception("falha ao enviar álbum")
+                sobras += [legenda for _, legenda in itens[i:i + 10]]
+        if sobras:
+            self.avisar("\n\n".join(sobras))
+
     def responder(self, texto):
         self.avisar(texto)
 

@@ -45,7 +45,7 @@ def main():
 
     tg = Telegram(cfg["telegram_token"])
     bot = Bot(tg, None)
-    monitor = Monitor(bot.avisar)
+    monitor = Monitor(bot.avisar, bot.avisar_album)
     bot.monitor = monitor
 
     if "--uma-vez" in sys.argv:

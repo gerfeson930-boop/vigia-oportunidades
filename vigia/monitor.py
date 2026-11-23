@@ -83,9 +83,10 @@ def formatar_alerta(a, busca, info, motivo_extra=None):
 
 
 class Monitor:
-    def __init__(self, avisar):
-        """avisar(texto, foto=None) envia a mensagem ao usuário."""
+    def __init__(self, avisar, avisar_album=None):
+        """avisar(texto, foto=None) envia uma mensagem; avisar_album([(foto, legenda)]) envia fotos em álbum."""
         self.avisar = avisar
+        self.avisar_album = avisar_album
         self.acordar = threading.Event()
         self.parar = threading.Event()
         self.bloqueio_ate = {}      # fonte -> timestamp
@@ -276,22 +277,25 @@ class Monitor:
                     self.avisar(al["texto"], al["foto"] or None)
                     boas_enviadas += 1
                 else:
-                    leves.append((al["desconto"], al["linha"]))
+                    leves.append((al["desconto"], al["linha"], al["foto"]))
         for t in trabalhadores:
             t.join(timeout=60)
 
         if leves:
             leves.sort(key=lambda x: -x[0])
-            texto = (f"💡 <b>Também um pouco abaixo da média</b> ({len(leves)}), "
-                     f"do maior para o menor desconto:\n")
-            for _, linha in leves[:MAX_LINHAS_RESUMO]:
-                if len(texto) + len(linha) > 3900:
-                    self.avisar(texto)
-                    texto = ""
-                texto += "\n" + linha
-            if len(leves) > MAX_LINHAS_RESUMO:
-                texto += f"\n… e mais {len(leves) - MAX_LINHAS_RESUMO}. Veja em 🔔 Achados."
-            self.avisar(texto)
+            mostrar = leves[:MAX_LINHAS_RESUMO]
+            extra = (f" Mostrando os {len(mostrar)} maiores; o resto está em 🔔 Achados."
+                     if len(leves) > len(mostrar) else "")
+            self.avisar(f"💡 <b>Também um pouco abaixo da média</b> ({len(leves)}), "
+                        f"do maior para o menor desconto. Toque na foto para ver o link.{extra}")
+            com_foto = [(foto, linha.removeprefix("• ")) for _, linha, foto in mostrar if foto]
+            sem_foto = [linha for _, linha, foto in mostrar if not foto]
+            if com_foto and self.avisar_album:
+                self.avisar_album(com_foto)
+            else:
+                sem_foto = [linha for _, linha, _ in mostrar]
+            if sem_foto:
+                self.avisar("\n".join(sem_foto))
         if resumos:  # buscas novas: um resumo só, em vez de uma mensagem por busca
             cab = (f"📊 <b>Preços aprendidos</b> ({len(resumos)} buscas novas). A partir da próxima rodada:\n"
                    f"🔥 {cfg['desconto_forte']}%+ abaixo da média: pechincha, com foto, na hora\n"
