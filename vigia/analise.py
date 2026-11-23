@@ -126,6 +126,40 @@ def mediana_robusta(precos):
 FORTE, BOA, LEVE = "forte", "boa", "leve"
 
 
+def avaliar_promocao(anuncio, busca, precos_usados, cfg):
+    """Promoção de loja (produto novo, ex.: Pelando), comparada com a média dos USADOS.
+
+    forte: novo X% (desconto_forte) abaixo da média dos usados -> ótimo para revenda
+    boa:   novo mais barato que a média dos usados
+    leve:  promoção, mas acima da média dos usados (vai no resumo)
+    """
+    med = mediana_robusta(precos_usados) if len(precos_usados) >= cfg["amostras_min"] else None
+    info = {"mediana": med, "amostras": len(precos_usados), "defeito": False, "urgencia": [],
+            "desconto": None, "motivos": [], "suspeito": False, "nivel": None, "promocao": True}
+    if med:
+        desconto = (1 - anuncio.preco / med) * 100
+        info["desconto"] = desconto
+        if anuncio.preco < med * 0.35:
+            return None  # quase sempre acessório (capa, cabo) ou cupom genérico
+        if desconto >= cfg["desconto_forte"]:
+            info["nivel"] = FORTE
+            info["motivos"].append(f"produto NOVO {desconto:.0f}% abaixo da média dos usados")
+        elif desconto >= 0:
+            info["nivel"] = BOA
+            info["motivos"].append("produto novo mais barato que a média dos usados")
+        elif cfg["desconto_leve"]:
+            info["nivel"] = LEVE
+            info["motivos"].append(f"promoção, {-desconto:.0f}% acima da média dos usados")
+    elif cfg["desconto_leve"]:
+        info["nivel"] = LEVE
+        info["motivos"].append("promoção nova (ainda sem média de usados para comparar)")
+    if busca.get("teto") and anuncio.preco <= busca["teto"]:
+        info["motivos"].append(f"dentro do seu teto de R$ {busca['teto']:,.0f}".replace(",", "."))
+        if info["nivel"] in (None, LEVE):
+            info["nivel"] = BOA
+    return info if info["nivel"] else None
+
+
 def avaliar(anuncio, busca, precos_ref, cfg):
     """Decide se vale alertar e em que nível. Retorna dict (com "nivel") ou None.
 

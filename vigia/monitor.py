@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from . import analise, config, db
-from .fontes import enjoei, ml, olx
+from .fontes import enjoei, ml, olx, pelando
 from .fontes.base import FonteBloqueada
 
 log = logging.getLogger("vigia.monitor")
@@ -17,7 +17,8 @@ PAUSA_BLOQUEIO = 60 * 60   # 1 h sem tocar numa fonte que bloqueou
 MAX_BOAS_RODADA = 20       # alertas "boa" com foto por rodada; o excedente vai para o resumo
 MAX_LINHAS_RESUMO = 25
 ALERTADO = {analise.LEVE: 1, analise.BOA: 2, analise.FORTE: 2}  # nível gravado no banco
-NOMES_FONTE = {"olx": "OLX", "enjoei": "Enjoei", "ml": "Mercado Livre"}
+NOMES_FONTE = {"olx": "OLX", "enjoei": "Enjoei", "ml": "Mercado Livre", "pelando": "Pelando"}
+PROMOCOES = {"pelando"}  # fontes de produto novo em loja: comparadas com a média dos usados
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
@@ -26,11 +27,21 @@ def _brl(v):
     return f"R$ {v:,.0f}".replace(",", ".")
 
 
+def _variacao(desconto):
+    return f"-{desconto:.0f}%" if desconto >= 0 else f"+{-desconto:.0f}%"
+
+
 def linha_resumo(a, info):
     e = html.escape
-    desc = f"<b>-{info['desconto']:.0f}%</b> " if info.get("desconto") is not None else ""
-    media = f" (média {_brl(info['mediana'])})" if info.get("mediana") else ""
-    onde = NOMES_FONTE.get(a.fonte, a.fonte) if a.fonte != "olx" else (a.local.split(",")[0] if a.local else "")
+    desc = f"<b>{_variacao(info['desconto'])}</b> " if info.get("desconto") is not None else ""
+    rotulo = "média usados" if a.fonte in PROMOCOES else "média"
+    media = f" ({rotulo} {_brl(info['mediana'])})" if info.get("mediana") else ""
+    if a.fonte in PROMOCOES:
+        onde = f"🏷️ {a.local} via {NOMES_FONTE[a.fonte]}"
+    elif a.fonte != "olx":
+        onde = NOMES_FONTE.get(a.fonte, a.fonte)
+    else:
+        onde = a.local.split(",")[0] if a.local else ""
     return (f"• {desc}{_brl(a.preco)}{media} — <a href=\"{e(a.url)}\">{e(a.titulo[:55])}</a>"
             + (f" · {e(onde)}" if onde else ""))
 
@@ -46,18 +57,25 @@ def formatar_alerta(a, busca, info, motivo_extra=None):
         marcas.append("🔧 com defeito / para conserto")
     if info["urgencia"]:
         marcas.append("⏱ vendedor com pressa: " + ", ".join(info["urgencia"]))
+    promo = a.fonte in PROMOCOES
+    rotulo = "média dos usados" if promo else "média"
     preco = f"💰 <b>{_brl(a.preco)}</b>"
     if info["mediana"] and info.get("desconto") is not None:
-        preco += f"  (média {_brl(info['mediana'])}, <b>-{info['desconto']:.0f}%</b>)"
+        preco += f"  ({rotulo} {_brl(info['mediana'])}, <b>{_variacao(info['desconto'])}</b>)"
     elif info["mediana"]:
-        preco += f"  (média {_brl(info['mediana'])})"
-    icone = "🔥" if info.get("nivel") == analise.FORTE else "🔔"
+        preco += f"  ({rotulo} {_brl(info['mediana'])})"
+    icone = "🔥" if info.get("nivel") == analise.FORTE else ("🏷️" if promo else "🔔")
+    if promo:
+        marcas.insert(0, f"🏷️ <b>PROMOÇÃO</b> de loja, produto novo: {e(a.local)}")
+        onde = f"🛒 {e(a.local)} (via {NOMES_FONTE[a.fonte]})  ·  {e(a.data)}"
+    else:
+        onde = f"📍 {e(a.local)}  ·  {NOMES_FONTE.get(a.fonte, a.fonte.upper())}  ·  {e(a.data)}"
     linhas = [
         preco,
         f"{icone} <b>{e(a.titulo)}</b>",
         "✅ " + "; ".join(info["motivos"] + ([motivo_extra] if motivo_extra else [])),
         *marcas,
-        f"📍 {e(a.local)}  ·  {NOMES_FONTE.get(a.fonte, a.fonte.upper())}  ·  {e(a.data)}",
+        onde,
         f"🔎 busca #{busca['id']}: {e(busca['termo'])}",
         f'<a href="{e(a.url)}">Abrir anúncio</a>',
     ]
@@ -98,7 +116,8 @@ class Monitor:
         base = busca["fontes_base"]
         anuncios, ok = [], set()
         fontes = [("olx", lambda aprende: olx.buscar(navegador, busca["termo"], 2 if aprende else 1)),
-                  ("enjoei", lambda aprende: enjoei.buscar(navegador, busca["termo"], recentes=not aprende))]
+                  ("enjoei", lambda aprende: enjoei.buscar(navegador, busca["termo"], recentes=not aprende)),
+                  ("pelando", lambda aprende: pelando.buscar(navegador, busca["termo"]))]
         if ml.configurado():
             fontes.append(("ml", lambda aprende: ml.buscar(busca["termo"], 2 if aprende else 1)))
         for fonte, buscar in fontes:
@@ -135,9 +154,13 @@ class Monitor:
             vistos.add((a.fonte, a.id))
             relevantes += 1
             defeito = analise.tem_defeito(a.titulo)
+            promo = a.fonte in PROMOCOES
             antigo = db.anuncio_existente(a.fonte, a.id, busca["id"])
             info = extra = None
-            if a.fonte in busca["fontes_base"]:
+            if promo and a.fonte in busca["fontes_base"]:
+                if antigo is None:  # promoção: avisa uma vez, comparando com a média dos usados
+                    info = analise.avaliar_promocao(a, busca, db.precos_referencia(busca["id"]), cfg)
+            elif a.fonte in busca["fontes_base"]:
                 ref = self._referencia(busca["id"], a.fonte, cfg)
                 if antigo is None:
                     info = analise.avaliar(a, busca, ref, cfg)
@@ -148,7 +171,8 @@ class Monitor:
                     if info and antigo["alertado"] and ALERTADO[info["nivel"]] <= antigo["alertado"]:
                         info = None  # já avisado nesse nível
             nivel = ALERTADO[info["nivel"]] if info else 0
-            db.gravar_anuncio(a, busca["id"], valido_media=not defeito, alertado=nivel)
+            # produto novo de loja não entra na média dos usados
+            db.gravar_anuncio(a, busca["id"], valido_media=not defeito and not promo, alertado=nivel)
             if info:
                 alertas.append({"nivel": info["nivel"], "desconto": info.get("desconto") or 0,
                                 "texto": formatar_alerta(a, busca, info, extra), "foto": a.foto,
