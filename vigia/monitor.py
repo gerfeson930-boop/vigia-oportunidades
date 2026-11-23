@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 
 from . import analise, config, db
-from .fontes import enjoei, ml, olx, pelando
+from .fontes import enjoei, kabum, ml, olx, pelando, sodre
 from .fontes.base import FonteBloqueada
 
 log = logging.getLogger("vigia.monitor")
@@ -17,8 +17,22 @@ PAUSA_BLOQUEIO = 60 * 60   # 1 h sem tocar numa fonte que bloqueou
 MAX_BOAS_RODADA = 20       # alertas "boa" com foto por rodada; o excedente vai para o resumo
 MAX_LINHAS_RESUMO = 25
 ALERTADO = {analise.LEVE: 1, analise.BOA: 2, analise.FORTE: 2}  # nível gravado no banco
-NOMES_FONTE = {"olx": "OLX", "enjoei": "Enjoei", "ml": "Mercado Livre", "pelando": "Pelando"}
-PROMOCOES = {"pelando"}  # fontes de produto novo em loja: comparadas com a média dos usados
+NOMES_FONTE = {"olx": "OLX", "enjoei": "Enjoei", "ml": "Mercado Livre", "pelando": "Pelando",
+               "kabum": "KaBuM", "leilao": "Leilão Sodré Santoro", "telegram": "grupo do Telegram"}
+PROMOCOES = {"pelando", "kabum"}  # produto novo em loja: comparado com a média dos usados
+QUEDA_LOJA = 0.90                 # loja: avisa quando o preço cai 10% ou mais desde a última vez
+MAX_LEILOES_RODADA = 10
+
+
+def formatar_leilao(a, termo):
+    e = html.escape
+    return "\n".join([
+        f"🔨 <b>LEILÃO</b> · {e(a.data)}",
+        f"📦 <b>{e(a.titulo[:200])}</b>",
+        f"📍 {e(a.local)}  ·  Sodré Santoro",
+        f"🔎 palavra-chave de leilão: {e(termo)}",
+        f'<a href="{e(a.url)}">Ver lote e dar lance</a>',
+    ])
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
@@ -118,7 +132,8 @@ class Monitor:
         anuncios, ok = [], set()
         fontes = [("olx", lambda aprende: olx.buscar(navegador, busca["termo"], 2 if aprende else 1)),
                   ("enjoei", lambda aprende: enjoei.buscar(navegador, busca["termo"], recentes=not aprende)),
-                  ("pelando", lambda aprende: pelando.buscar(navegador, busca["termo"]))]
+                  ("pelando", lambda aprende: pelando.buscar(navegador, busca["termo"])),
+                  ("kabum", lambda aprende: kabum.buscar(navegador, busca["termo"]))]
         if ml.configurado():
             fontes.append(("ml", lambda aprende: ml.buscar(busca["termo"], 2 if aprende else 1)))
         for fonte, buscar in fontes:
@@ -159,8 +174,20 @@ class Monitor:
             antigo = db.anuncio_existente(a.fonte, a.id, busca["id"])
             info = extra = None
             if promo and a.fonte in busca["fontes_base"]:
-                if antigo is None:  # promoção: avisa uma vez, comparando com a média dos usados
-                    info = analise.avaliar_promocao(a, busca, db.precos_referencia(busca["id"]), cfg)
+                usados = db.precos_referencia(busca["id"])
+                if antigo is None:  # promoção/produto novo: compara com a média dos usados
+                    info = analise.avaliar_promocao(a, busca, usados, cfg)
+                elif antigo["alertado"] < 2 and a.preco <= antigo["preco"] * QUEDA_LOJA:
+                    # o preço da loja caiu: avisa (no mínimo no resumo 💡)
+                    queda = (1 - a.preco / antigo["preco"]) * 100
+                    extra = f"preço caiu {queda:.0f}% na loja (era {_brl(antigo['preco'])})"
+                    info = analise.avaliar_promocao(a, busca, usados, cfg) or {
+                        "mediana": None, "amostras": 0, "defeito": False, "urgencia": [], "desconto": None,
+                        "motivos": [], "suspeito": False, "nivel": analise.LEVE, "promocao": True}
+                    if info["nivel"] is None:
+                        info["nivel"] = analise.LEVE
+                    if antigo["alertado"] and ALERTADO[info["nivel"]] <= antigo["alertado"] and queda < 20:
+                        info = None  # já avisado nesse nível e a queda não é grande
             elif a.fonte in busca["fontes_base"]:
                 ref = self._referencia(busca["id"], a.fonte, cfg)
                 if antigo is None:
@@ -177,7 +204,7 @@ class Monitor:
             if info:
                 alertas.append({"nivel": info["nivel"], "desconto": info.get("desconto") or 0,
                                 "texto": formatar_alerta(a, busca, info, extra), "foto": a.foto,
-                                "linha": linha_resumo(a, info)})
+                                "linha": linha_resumo(a, info) + (f" · 📉 {html.escape(extra)}" if extra else "")})
         if fontes_ok - busca["fontes_base"]:
             db.marcar_fontes_base(busca["id"], fontes_ok)
         resumo = None
@@ -280,6 +307,8 @@ class Monitor:
                     leves.append((al["desconto"], al["linha"], al["foto"]))
         for t in trabalhadores:
             t.join(timeout=60)
+        if not self.parar.is_set():
+            self._leiloes(cfg)
 
         if leves:
             leves.sort(key=lambda x: -x[0])
@@ -310,6 +339,48 @@ class Monitor:
                 texto += "\n" + r
             self.avisar(texto)
         self.ultima_rodada = datetime.now()
+
+    def _leiloes(self, cfg):
+        """Lotes novos da Sodré Santoro com as palavras-chave de leilão (1ª vez de cada termo só aprende)."""
+        termos = cfg.get("leilao_termos") or sodre.TERMOS_PADRAO
+        if not termos or not self._fonte_livre("leilao"):
+            return
+        base = set(cfg.get("leilao_base") or [])
+        from playwright.sync_api import sync_playwright
+        enviados, aprendidos = 0, set()
+        try:
+            with sync_playwright() as p:
+                navegador = p.chromium.launch(headless=True)
+                ctx = navegador.new_context(locale="pt-BR", viewport={"width": 1366, "height": 900},
+                                            user_agent=UA)
+                try:
+                    for termo in termos:
+                        if self.parar.is_set():
+                            break
+                        try:
+                            lotes = sodre.buscar(ctx, termo)
+                        except FonteBloqueada as e:
+                            self._bloquear("leilao", e)
+                            break
+                        except Exception as e:
+                            log.warning("leilão '%s' falhou: %s", termo, e)
+                            continue
+                        for a in lotes:
+                            if db.anuncio_existente("leilao", a.id, 0):
+                                continue  # lote já visto (em qualquer palavra-chave)
+                            avisar = termo in base and enviados < MAX_LEILOES_RODADA
+                            db.gravar_anuncio(a, 0, valido_media=False, alertado=2 if avisar else 0)
+                            if avisar:
+                                self.avisar(formatar_leilao(a, termo), a.foto or None)
+                                enviados += 1
+                        aprendidos.add(termo)
+                        time.sleep(random.uniform(1, 3))
+                finally:
+                    navegador.close()
+        except Exception:
+            log.exception("erro nos leilões")
+        if aprendidos - base:
+            config.salvar({"leilao_base": sorted(base | aprendidos)})
 
     def rodada_unica(self):
         """Modo nuvem: uma rodada e encerra."""

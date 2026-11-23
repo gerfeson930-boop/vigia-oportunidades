@@ -26,10 +26,11 @@ COMANDOS = [
     ("status", "Situação do vigia"),
     ("pessoas", "Quem recebe os alertas (compartilhar)"),
     ("grupos", "Grupos de promoção que eu leio"),
+    ("leilao", "Palavras-chave de leilão: /leilao notebook"),
     ("ajuda", "Como usar"),
 ]
 
-AJUDA = """<b>Vigia de oportunidades</b> (OLX em MG, Enjoei Brasil todo e promoções do Pelando{ml})
+AJUDA = """<b>Vigia de oportunidades</b> (OLX em MG, Enjoei, KaBuM, promoções do Pelando e leilões da Sodré Santoro{ml})
 
 Use os botões aqui embaixo, ou <b>digite o nome de um produto</b> para começar a vigiar.
 🔔 <b>Achados</b> mostra os últimos alertas com link.
@@ -487,6 +488,34 @@ class Bot:
         estado = "lendo" if leitor and leitor.ativo else "parado"
         erro = f" · erro: {html.escape(leitor.ultimo_erro[:100])}" if leitor and leitor.ultimo_erro else ""
         return f"{estado} {len(lidos)} ({html.escape(', '.join(list(lidos.values())[:5]))}){erro}"
+
+    def c_leilao(self, arg):
+        """/leilao (lista) · /leilao notebook gamer (adiciona) · /leilao -notebook (remove)."""
+        from .fontes import sodre
+        cfg = config.carregar()
+        termos = list(cfg.get("leilao_termos") or sodre.TERMOS_PADRAO)
+        arg = arg.strip().lower()
+        if arg:
+            if self._atual != cfg.get("chat_id"):
+                return self.responder("🔒 Só o dono do vigia pode mudar as palavras de leilão.")
+            if arg.startswith("-"):
+                termo = arg[1:].strip()
+                if termo not in termos:
+                    raise ValueError(f"'{termo}' não está na lista; veja /leilao")
+                termos.remove(termo)
+                acao = f"🗑 '{html.escape(termo)}' removido."
+            else:
+                if arg in termos:
+                    raise ValueError(f"'{arg}' já está na lista")
+                termos.append(arg)
+                acao = (f"🆕 '{html.escape(arg)}' adicionado. Na próxima rodada eu aprendo os lotes atuais; "
+                        f"a partir da seguinte aviso cada lote novo.")
+            config.salvar({"leilao_termos": termos})
+            return self.responder(acao)
+        self.responder("🔨 <b>Palavras-chave de leilão</b> (Sodré Santoro, eletrônicos/informática/equipamentos):\n"
+                       + ", ".join(html.escape(t) for t in termos)
+                       + "\n\nAviso cada lote novo com foto, lance e data. Para mudar:\n"
+                         "<code>/leilao notebook gamer</code> adiciona · <code>/leilao -drone</code> remove")
 
     def c_grupos(self, arg):
         cfg = config.carregar()

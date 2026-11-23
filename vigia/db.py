@@ -135,7 +135,7 @@ def precos_referencia(busca_id, limite=80, fonte=None):
 
 
 def ultimos_alertas(limite=15):
-    return _todos("""SELECT a.*, b.termo FROM anuncios a JOIN buscas b ON b.id = a.busca_id
+    return _todos("""SELECT a.*, COALESCE(b.termo, 'leilão') AS termo FROM anuncios a LEFT JOIN buscas b ON b.id = a.busca_id
                      WHERE a.alertado>=1 ORDER BY a.visto_em DESC LIMIT ?""", (limite,))
 
 
