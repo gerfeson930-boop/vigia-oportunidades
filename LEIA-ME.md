@@ -1,7 +1,8 @@
-# Vigia de Oportunidades (v1: revenda no OLX, MG)
+# Vigia de Oportunidades (revenda: OLX em MG + Enjoei Brasil todo)
 
-Fica checando o OLX de Minas Gerais a cada 10 minutos. Quando aparece um anúncio bem abaixo da
-média de anúncios parecidos, ele te avisa no Telegram, com foto e link.
+Fica checando o **OLX de Minas Gerais** e o **Enjoei** (que envia para o Brasil todo), com 3 buscas ao
+mesmo tempo, e repete 10 minutos depois de cada rodada. Quando aparece um anúncio abaixo da média de
+anúncios parecidos, ele te avisa no Telegram com foto, preço e link.
 
 ## Instalar
 
@@ -19,14 +20,23 @@ média de anúncios parecidos, ele te avisa no Telegram, com foto e link.
 | `/nova iphone 13 -pro -max ate 2300 desc 30` | cria uma busca (`-palavra` exclui, `ate` = teto, `desc` = % abaixo da média) |
 | `/nova lote eletronicos todos` | avisa **todo** anúncio novo (para lotes e queima de estoque) |
 | `/lista` · `/remove 3` · `/desliga 3` · `/liga 3` | gerenciar as buscas |
-| `/desconto 30` · `/desconto 3 40` | % exigido: em todas as buscas ou só na #3 |
+| `/faixas` | mostra as faixas de desconto |
+| `/forte 35` · `/desconto 25` · `/leve 12` | % para 🔥 pechincha, ✅ boa oferta e 💡 resumo (`/leve 0` desliga) |
+| `/desconto 3 40` | % de boa oferta só para a busca #3 |
 | `/agora` · `/pausa` · `/retoma` · `/status` | controle do vigia |
 
 ## Como ele decide
 
-- **1ª rodada de cada busca:** só aprende os preços, sem alertas, e te manda a média.
-- **Depois disso:** avisa quando aparece anúncio novo X% abaixo da **mediana** (25% por padrão). Também
-  avisa quando um anúncio já conhecido baixa de preço.
+- **1ª rodada de cada busca (e de cada plataforma nova):** só aprende os preços, sem alertas.
+- **Depois disso**, para cada anúncio novo, compara com a **mediana** (da própria plataforma, quando
+  ela tem anúncios suficientes):
+  - 🔥 **35%+ abaixo:** pechincha, com foto, na hora e sempre primeiro
+  - ✅ **25%+:** boa oferta, com foto
+  - 💡 **12%+:** entra num resumo no fim da rodada, do maior para o menor desconto
+- Também avisa quando um anúncio já conhecido baixa de preço.
+- Ignora máquina inteira em busca de peça ("pc gamer rtx 3060" na busca "rtx 3060"), fone avulso
+  ("lado L") e termos típicos de réplica.
+- Se uma plataforma bloquear, fica 1 hora sem acessá-la e volta a fazer 1 busca por vez nesse tempo.
 - Precisa de **15 anúncios de referência** antes de confiar na média. Buscas muito específicas, com
   poucos anúncios em MG, só avisam pelo teto (`ate`).
 - Anúncio com "urgente", "mudança", "aceito proposta" etc. precisa de 10 pontos a menos de desconto.

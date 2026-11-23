@@ -1,13 +1,14 @@
-"""O vigia: roda as buscas em intervalos, compara com a média e dispara alertas."""
+"""O vigia: roda as buscas em intervalos (várias ao mesmo tempo), compara com a média e dispara alertas."""
 import html
 import logging
+import queue
 import random
 import threading
 import time
 from datetime import datetime
 
 from . import analise, config, db
-from .fontes import ml, olx
+from .fontes import enjoei, ml, olx
 from .fontes.base import FonteBloqueada
 
 log = logging.getLogger("vigia.monitor")
@@ -16,6 +17,9 @@ PAUSA_BLOQUEIO = 60 * 60   # 1 h sem tocar numa fonte que bloqueou
 MAX_BOAS_RODADA = 20       # alertas "boa" com foto por rodada; o excedente vai para o resumo
 MAX_LINHAS_RESUMO = 25
 ALERTADO = {analise.LEVE: 1, analise.BOA: 2, analise.FORTE: 2}  # nível gravado no banco
+NOMES_FONTE = {"olx": "OLX", "enjoei": "Enjoei", "ml": "Mercado Livre"}
+UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
 
 def _brl(v):
@@ -26,8 +30,9 @@ def linha_resumo(a, info):
     e = html.escape
     desc = f"<b>-{info['desconto']:.0f}%</b> " if info.get("desconto") is not None else ""
     media = f" (média {_brl(info['mediana'])})" if info.get("mediana") else ""
+    onde = NOMES_FONTE.get(a.fonte, a.fonte) if a.fonte != "olx" else (a.local.split(",")[0] if a.local else "")
     return (f"• {desc}{_brl(a.preco)}{media} — <a href=\"{e(a.url)}\">{e(a.titulo[:55])}</a>"
-            + (f" · {e(a.local.split(',')[0])}" if a.local else ""))
+            + (f" · {e(onde)}" if onde else ""))
 
 
 def formatar_alerta(a, busca, info, motivo_extra=None):
@@ -52,7 +57,7 @@ def formatar_alerta(a, busca, info, motivo_extra=None):
         f"{icone} <b>{e(a.titulo)}</b>",
         "✅ " + "; ".join(info["motivos"] + ([motivo_extra] if motivo_extra else [])),
         *marcas,
-        f"📍 {e(a.local)}  ·  {a.fonte.upper()}  ·  {e(a.data)}",
+        f"📍 {e(a.local)}  ·  {NOMES_FONTE.get(a.fonte, a.fonte.upper())}  ·  {e(a.data)}",
         f"🔎 busca #{busca['id']}: {e(busca['termo'])}",
         f'<a href="{e(a.url)}">Abrir anúncio</a>',
     ]
@@ -66,49 +71,59 @@ class Monitor:
         self.acordar = threading.Event()
         self.parar = threading.Event()
         self.bloqueio_ate = {}      # fonte -> timestamp
+        self.devagar_ate = 0        # depois de um bloqueio, volta a 1 busca por vez por 1 h
         self.ultima_rodada = None
         self.ultimo_erro = None
-        self._contexto = None
+        self._trava = threading.Lock()
 
-    # ---- navegador ----
-    def _navegador(self, p):
-        if self._contexto is None:
-            self._contexto = p.chromium.launch_persistent_context(
-                str(config.DADOS / "navegador"), headless=True, locale="pt-BR",
-                viewport={"width": 1366, "height": 900},
-                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"),
-            )
-        return self._contexto
-
+    # ---- fontes ----
     def _fonte_livre(self, fonte):
         return time.time() >= self.bloqueio_ate.get(fonte, 0)
 
     def _bloquear(self, fonte, erro):
-        self.bloqueio_ate[fonte] = time.time() + PAUSA_BLOQUEIO
+        with self._trava:
+            if not self._fonte_livre(fonte):
+                return  # outra busca em paralelo já registrou e avisou
+            self.bloqueio_ate[fonte] = time.time() + PAUSA_BLOQUEIO
+            self.devagar_ate = time.time() + PAUSA_BLOQUEIO
         log.warning("%s bloqueado: %s", fonte, erro)
-        self.avisar(f"🚧 {fonte.upper()} recusou o acesso ({html.escape(str(erro)[:150])}).\n"
-                    f"Vou deixar essa fonte quieta por 1 hora e tento de novo.")
+        self.avisar(f"🚧 {NOMES_FONTE.get(fonte, fonte)} recusou o acesso ({html.escape(str(erro)[:150])}).\n"
+                    f"Vou deixar essa fonte quieta por 1 hora e, nesse tempo, fazer 1 busca por vez.")
 
-    # ---- uma busca ----
-    def coletar(self, p, busca):
-        paginas = 1 if busca["linha_base"] else 2
-        anuncios = []
-        if self._fonte_livre("olx"):
-            try:
-                anuncios += olx.buscar(self._navegador(p), busca["termo"], paginas)
-            except FonteBloqueada as e:
-                self._bloquear("olx", e)
-        if ml.configurado() and self._fonte_livre("ml"):
-            try:
-                anuncios += ml.buscar(busca["termo"], paginas)
-            except FonteBloqueada as e:
-                self._bloquear("ml", e)
-        return anuncios
+    def coletar(self, navegador, busca):
+        """Busca em todas as fontes. Devolve (anuncios, fontes_que_responderam).
 
-    def processar(self, busca, anuncios, cfg):
+        Numa fonte em que a busca ainda não aprendeu os preços, pega mais anúncios (2 páginas no
+        OLX; no Enjoei, sem o filtro de 24 h)."""
+        base = busca["fontes_base"]
+        anuncios, ok = [], set()
+        fontes = [("olx", lambda aprende: olx.buscar(navegador, busca["termo"], 2 if aprende else 1)),
+                  ("enjoei", lambda aprende: enjoei.buscar(navegador, busca["termo"], recentes=not aprende))]
+        if ml.configurado():
+            fontes.append(("ml", lambda aprende: ml.buscar(busca["termo"], 2 if aprende else 1)))
+        for fonte, buscar in fontes:
+            if not self._fonte_livre(fonte):
+                continue
+            try:
+                anuncios += buscar(fonte not in base)
+                ok.add(fonte)
+            except FonteBloqueada as e:
+                self._bloquear(fonte, e)
+            except Exception as e:  # uma fonte com problema não derruba as outras
+                log.warning("%s falhou na busca #%s: %s", fonte, busca["id"], e)
+        return anuncios, ok
+
+    # ---- análise ----
+    @staticmethod
+    def _referencia(busca_id, fonte, cfg):
+        """Média da própria plataforma quando há amostras; senão, de todas juntas."""
+        so_fonte = db.precos_referencia(busca_id, fonte=fonte)
+        return so_fonte if len(so_fonte) >= cfg["amostras_min"] else db.precos_referencia(busca_id)
+
+    def processar(self, busca, anuncios, fontes_ok, cfg):
         """Grava os anúncios e devolve (alertas, resumo_da_busca_nova).
 
+        Só alerta em fontes onde a busca já aprendeu os preços; nas outras, só aprende.
         Cada alerta é um dict: nivel, desconto, texto (card com foto), foto, linha (para o resumo).
         """
         alertas = []
@@ -121,9 +136,9 @@ class Monitor:
             relevantes += 1
             defeito = analise.tem_defeito(a.titulo)
             antigo = db.anuncio_existente(a.fonte, a.id, busca["id"])
-            ref = db.precos_referencia(busca["id"])
             info = extra = None
-            if busca["linha_base"]:
+            if a.fonte in busca["fontes_base"]:
+                ref = self._referencia(busca["id"], a.fonte, cfg)
                 if antigo is None:
                     info = analise.avaliar(a, busca, ref, cfg)
                 elif antigo["alertado"] < 2 and a.preco <= antigo["preco"] * 0.95:
@@ -138,8 +153,10 @@ class Monitor:
                 alertas.append({"nivel": info["nivel"], "desconto": info.get("desconto") or 0,
                                 "texto": formatar_alerta(a, busca, info, extra), "foto": a.foto,
                                 "linha": linha_resumo(a, info)})
+        if fontes_ok - busca["fontes_base"]:
+            db.marcar_fontes_base(busca["id"], fontes_ok)
         resumo = None
-        if not busca["linha_base"]:
+        if not busca["linha_base"] and fontes_ok:
             db.atualizar_busca(busca["id"], linha_base=1)
             ref = db.precos_referencia(busca["id"])
             med = analise.mediana_robusta(ref)
@@ -153,34 +170,92 @@ class Monitor:
         return alertas, resumo
 
     # ---- rodada ----
-    def rodada(self, p):
+    def _trabalhador(self, fila, saida):
+        """Thread com navegador próprio: pega buscas da fila e devolve o que coletou."""
+        from playwright.sync_api import sync_playwright
+        try:
+            with sync_playwright() as p:
+                navegador = p.chromium.launch(headless=True)
+                ctx = navegador.new_context(locale="pt-BR", viewport={"width": 1366, "height": 900},
+                                            user_agent=UA)
+                try:
+                    while not self.parar.is_set():
+                        try:
+                            busca = fila.get_nowait()
+                        except queue.Empty:
+                            break
+                        try:
+                            saida.put((busca, *self.coletar(ctx, busca), None))
+                        except Exception as e:
+                            saida.put((busca, [], set(), e))
+                        time.sleep(random.uniform(2, 5))  # pausa entre buscas, para não martelar o site
+                finally:
+                    navegador.close()
+        except Exception as e:  # navegador não abriu: devolve o erro para cada busca restante
+            log.exception("trabalhador de coleta falhou")
+            while True:
+                try:
+                    saida.put((fila.get_nowait(), [], set(), e))
+                except queue.Empty:
+                    break
+
+    def _proximo_resultado(self, saida, trabalhadores):
+        while True:  # espera o próximo resultado sem travar se as threads morrerem
+            try:
+                return saida.get(timeout=5)
+            except queue.Empty:
+                if self.parar.is_set():
+                    return None
+                if not any(t.is_alive() for t in trabalhadores) and saida.empty():
+                    return None
+
+    def rodada(self, p=None):
         cfg = config.carregar()
         buscas = db.listar_buscas(so_ativas=True)
-        boas_enviadas = 0
-        resumos = []
-        leves = []  # (desconto, linha): vão no resumo do fim da rodada, maior desconto primeiro
+        if not buscas:
+            self.ultima_rodada = datetime.now()
+            return
+        paralelo = 1 if time.time() < self.devagar_ate else max(1, int(cfg.get("paralelo", 3)))
+        fila, saida = queue.Queue(), queue.Queue()
         for b in buscas:
-            if self.parar.is_set():
-                return
+            fila.put(b)
+        trabalhadores = [threading.Thread(target=self._trabalhador, args=(fila, saida), daemon=True,
+                                          name=f"coleta-{i}") for i in range(min(paralelo, len(buscas)))]
+        for t in trabalhadores:
+            t.start()
+
+        ordem = {analise.FORTE: 0, analise.BOA: 1, analise.LEVE: 2}
+        boas_enviadas = 0
+        resumos, leves = [], []  # leves: (desconto, linha), vão no resumo do fim da rodada
+        for _ in buscas:
+            resultado = self._proximo_resultado(saida, trabalhadores)
+            if resultado is None:
+                break
+            busca, anuncios, fontes_ok, erro = resultado
+            if erro:
+                log.error("erro na busca #%s: %s", busca["id"], erro)
+                self.ultimo_erro = f"{datetime.now():%d/%m %H:%M} busca #{busca['id']}: {erro}"
+                continue
             try:
-                anuncios = self.coletar(p, b)
-                alertas, resumo = self.processar(b, anuncios, cfg)
-                if resumo:
-                    resumos.append(resumo)
-                # pechinchas primeiro, depois boas; dentro de cada nível, maior desconto primeiro
-                ordem = {analise.FORTE: 0, analise.BOA: 1, analise.LEVE: 2}
-                for al in sorted(alertas, key=lambda x: (ordem[x["nivel"]], -x["desconto"])):
-                    if al["nivel"] == analise.FORTE:
-                        self.avisar(al["texto"], al["foto"] or None)  # pechincha sai sempre e na hora
-                    elif al["nivel"] == analise.BOA and boas_enviadas < MAX_BOAS_RODADA:
-                        self.avisar(al["texto"], al["foto"] or None)
-                        boas_enviadas += 1
-                    else:
-                        leves.append((al["desconto"], al["linha"]))
-            except Exception as e:  # uma busca com problema não derruba as outras
-                log.exception("erro na busca #%s", b["id"])
-                self.ultimo_erro = f"{datetime.now():%d/%m %H:%M} busca #{b['id']}: {e}"
-            time.sleep(random.uniform(2, 5))  # pausa entre buscas, para não martelar o site
+                alertas, resumo = self.processar(busca, anuncios, fontes_ok, cfg)
+            except Exception as e:
+                log.exception("erro processando a busca #%s", busca["id"])
+                self.ultimo_erro = f"{datetime.now():%d/%m %H:%M} busca #{busca['id']}: {e}"
+                continue
+            if resumo:
+                resumos.append(resumo)
+            # pechinchas primeiro, depois boas; dentro de cada nível, maior desconto primeiro
+            for al in sorted(alertas, key=lambda x: (ordem[x["nivel"]], -x["desconto"])):
+                if al["nivel"] == analise.FORTE:
+                    self.avisar(al["texto"], al["foto"] or None)  # pechincha sai sempre e na hora
+                elif al["nivel"] == analise.BOA and boas_enviadas < MAX_BOAS_RODADA:
+                    self.avisar(al["texto"], al["foto"] or None)
+                    boas_enviadas += 1
+                else:
+                    leves.append((al["desconto"], al["linha"]))
+        for t in trabalhadores:
+            t.join(timeout=60)
+
         if leves:
             leves.sort(key=lambda x: -x[0])
             texto = (f"💡 <b>Também um pouco abaixo da média</b> ({len(leves)}), "
@@ -210,27 +285,17 @@ class Monitor:
 
     def rodada_unica(self):
         """Modo nuvem: uma rodada e encerra."""
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            try:
-                if not config.carregar()["pausado"]:
-                    self.rodada(p)
-            finally:
-                if self._contexto:
-                    self._contexto.close()
-                    self._contexto = None
+        if not config.carregar()["pausado"]:
+            self.rodada()
 
     def executar(self):
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            while not self.parar.is_set():
-                cfg = config.carregar()
-                if not cfg["pausado"]:
-                    log.info("rodada iniciada")
-                    self.rodada(p)
-                    log.info("rodada concluída")
-                espera = cfg["intervalo_min"] * 60 + random.uniform(-60, 60)
-                self.acordar.wait(timeout=max(60, espera))
-                self.acordar.clear()
-            if self._contexto:
-                self._contexto.close()
+        while not self.parar.is_set():
+            cfg = config.carregar()
+            if not cfg["pausado"]:
+                log.info("rodada iniciada")
+                inicio = time.time()
+                self.rodada()
+                log.info("rodada concluída em %.0f s", time.time() - inicio)
+            espera = cfg["intervalo_min"] * 60 + random.uniform(-60, 60)
+            self.acordar.wait(timeout=max(60, espera))
+            self.acordar.clear()

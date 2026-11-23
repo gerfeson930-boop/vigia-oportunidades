@@ -38,6 +38,10 @@ if "foto" not in {r[1] for r in _con.execute("PRAGMA table_info(anuncios)")}:
     _con.execute("ALTER TABLE anuncios ADD COLUMN foto TEXT NOT NULL DEFAULT ''")
 if "local" not in {r[1] for r in _con.execute("PRAGMA table_info(anuncios)")}:
     _con.execute("ALTER TABLE anuncios ADD COLUMN local TEXT NOT NULL DEFAULT ''")
+if "fontes_base" not in {r[1] for r in _con.execute("PRAGMA table_info(buscas)")}:
+    # fontes em que a busca já aprendeu os preços; buscas antigas só tinham OLX
+    _con.execute("ALTER TABLE buscas ADD COLUMN fontes_base TEXT NOT NULL DEFAULT ''")
+    _con.execute("UPDATE buscas SET fontes_base='olx' WHERE linha_base=1")
 _con.commit()
 
 
@@ -70,7 +74,16 @@ def listar_buscas(so_ativas=False):
     linhas = _todos(sql)
     for b in linhas:
         b["excluir"] = json.loads(b["excluir"])
+        b["fontes_base"] = set(filter(None, b["fontes_base"].split(",")))
     return linhas
+
+
+def marcar_fontes_base(busca_id, fontes):
+    atual = _todos("SELECT fontes_base FROM buscas WHERE id=?", (busca_id,))
+    if not atual:
+        return
+    todas = set(filter(None, atual[0]["fontes_base"].split(","))) | set(fontes)
+    _exec("UPDATE buscas SET fontes_base=? WHERE id=?", (",".join(sorted(todas)), busca_id))
 
 
 def obter_busca(busca_id):
@@ -78,6 +91,7 @@ def obter_busca(busca_id):
     if not r:
         return None
     r[0]["excluir"] = json.loads(r[0]["excluir"])
+    r[0]["fontes_base"] = set(filter(None, r[0]["fontes_base"].split(",")))
     return r[0]
 
 
@@ -112,9 +126,11 @@ def gravar_anuncio(a, busca_id, valido_media, alertado=False):
            a.foto or "", a.local or ""))
 
 
-def precos_referencia(busca_id, limite=80):
-    r = _todos("""SELECT preco FROM anuncios WHERE busca_id=? AND valido_media=1
-                  ORDER BY visto_em DESC LIMIT ?""", (busca_id, limite))
+def precos_referencia(busca_id, limite=80, fonte=None):
+    filtro = " AND fonte=?" if fonte else ""
+    params = (busca_id, fonte, limite) if fonte else (busca_id, limite)
+    r = _todos(f"""SELECT preco FROM anuncios WHERE busca_id=? AND valido_media=1{filtro}
+                   ORDER BY visto_em DESC LIMIT ?""", params)
     return [x["preco"] for x in r]
 
 

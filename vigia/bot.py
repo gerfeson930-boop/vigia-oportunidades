@@ -26,7 +26,7 @@ COMANDOS = [
     ("ajuda", "Como usar"),
 ]
 
-AJUDA = """<b>Vigia de oportunidades</b> (OLX{ml}, Minas Gerais)
+AJUDA = """<b>Vigia de oportunidades</b> (OLX em MG + Enjoei Brasil todo{ml})
 
 Use os botões aqui embaixo, ou <b>digite o nome de um produto</b> para começar a vigiar.
 🔔 <b>Achados</b> mostra os últimos alertas com link.

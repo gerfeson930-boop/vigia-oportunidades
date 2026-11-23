@@ -11,9 +11,18 @@ ACESSORIOS = {
     "alugo", "manutencao", "assistencia", "pulseira", "bolsa", "mochila",
     "dualsense", "joystick", "faceplate", "hd", "portal", "codigo", "resgate", "headset",
     "volante", "gift", "cartao", "cooler", "pelicula", "lente", "tripe",
+    # peça avulsa ("airpods pro lado L")
+    "lado", "esquerdo", "direito", "avulso",
+    # réplicas
+    "replica", "similar", "hmaston", "popup", "aaa",
 }
+# Expressões típicas de réplica/falsificação (comparadas no título normalizado).
+FALSIFICACAO = ["primeira linha", "1 1 ", "linha premium"]
+# Em busca de peça ("rtx 3060", "ssd 1tb"), anúncio de máquina inteira não serve ("pc gamer rtx 3060").
+PECAS = {"rtx", "gtx", "rx", "ryzen", "i3", "i5", "i7", "i9", "ssd", "memoria", "ddr4", "ddr5", "monitor"}
+MAQUINA_INTEIRA = {"pc", "computador", "gabinete", "notebook", "setup", "desktop"}
 # Só contam como acessório no início do título ("Tela iPhone 13"), não em "Notebook tela 15".
-AMBIGUOS = {"tela", "display", "teclado", "bateria", "base"}
+AMBIGUOS = {"tela", "display", "teclado", "bateria", "base", "estojo"}
 # Anúncios com defeito: ficam fora da média, mas podem virar alerta "para consertar".
 DEFEITO = [
     "defeito", "quebrad", "trincad", "nao liga", "nao funciona", "para pecas", "pra pecas",
@@ -87,6 +96,10 @@ def relevante(titulo, busca):
         return False
     inicio = set(normalizar(titulo).split()[:2])
     if (inicio & AMBIGUOS) - pal_busca:
+        return False
+    if any(f in norm_titulo for f in FALSIFICACAO):
+        return False
+    if pal_busca & PECAS and (pal_titulo & MAQUINA_INTEIRA) - pal_busca:
         return False
     return True
 

@@ -13,6 +13,7 @@ LOG = DADOS / "vigia.log"
 
 PADROES = {
     "intervalo_min": 10,      # minutos entre rodadas
+    "paralelo": 3,            # buscas ao mesmo tempo (cada uma num navegador próprio)
     "desconto_forte": 35,     # % abaixo da mediana: 🔥 pechincha (foto, destaque, vai primeiro)
     "desconto_padrao": 25,    # % abaixo da mediana: ✅ boa oferta (foto)
     "desconto_leve": 12,      # % abaixo da mediana: 💡 entra no resumo da rodada (0 desliga)
